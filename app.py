@@ -864,10 +864,10 @@ def _unwrap_bing_url(raw_url: str) -> str:
     return raw_url
 
 
-def _search_yandex(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT) -> list[dict[str, str]]:
+def _search_yandex(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT, page: int = 1) -> list[dict[str, str]]:
     try:
         from ddgs.engines.yandex import Yandex
-        res = Yandex(timeout=timeout).search(query, region="tr-tr", safesearch="moderate", timelimit=None, page=1)
+        res = Yandex(timeout=timeout).search(query, region="tr-tr", safesearch="moderate", timelimit=None, page=page)
         return [
             {"title": getattr(r, "title", ""), "href": getattr(r, "href", ""), "body": getattr(r, "body", ""), "engine": "Yandex"}
             for r in (res or [])[:max_results]
@@ -876,7 +876,7 @@ def _search_yandex(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT)
         return []
 
 
-def _search_bing(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT) -> list[dict[str, str]]:
+def _search_bing(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT, page: int = 1) -> list[dict[str, str]]:
     # Bing RSS ignores site: / complex boolean syntax and returns irrelevant global results; skip site: queries on Bing RSS.
     if "site:" in query.lower():
         return []
@@ -887,9 +887,12 @@ def _search_bing(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT) -
         return []
     try:
         import xml.etree.ElementTree as ET
+        params = {"q": clean_q, "format": "rss", "mkt": "tr-TR", "setlang": "tr", "count": str(max(max_results, 15))}
+        if page > 1:
+            params["first"] = str((page - 1) * 15 + 1)
         resp = _get_session().get(
             "https://www.bing.com/search",
-            params={"q": clean_q, "format": "rss", "mkt": "tr-TR", "setlang": "tr", "count": str(max(max_results, 15))},
+            params=params,
             timeout=timeout,
             verify=False,
         )
@@ -911,13 +914,13 @@ def _search_bing(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT) -
         return []
 
 
-def _search_ddgs_backend(query: str, backend: str, max_results: int, timeout: int = DEFAULT_TIMEOUT) -> list[dict[str, str]]:
+def _search_ddgs_backend(query: str, backend: str, max_results: int, timeout: int = DEFAULT_TIMEOUT, page: int = 1) -> list[dict[str, str]]:
     try:
         from ddgs import DDGS
-        res = DDGS(timeout=timeout).text(query, region="tr-tr", max_results=max_results, backend=backend)
+        res = DDGS(timeout=timeout).text(query, region="tr-tr", max_results=max_results, page=page, backend=backend)
         return [{"title": r.get("title", ""), "href": r.get("href", ""), "body": r.get("body", ""), "engine": backend.capitalize()} for r in (res or [])]
     except Exception:
-        if backend == "duckduckgo":
+        if backend == "duckduckgo" and page == 1:
             try:
                 import warnings
                 with warnings.catch_warnings():
@@ -930,15 +933,15 @@ def _search_ddgs_backend(query: str, backend: str, max_results: int, timeout: in
         return []
 
 
-def search_multi_engine(query: str, max_results: int = 15, timeout: int = DEFAULT_TIMEOUT) -> list[dict[str, str]]:
+def search_multi_engine(query: str, max_results: int = 15, timeout: int = DEFAULT_TIMEOUT, page: int = 1) -> list[dict[str, str]]:
     """Yandex, Bing, Yahoo ve DuckDuckGo arama kaynaklarını paralel olarak sorgular ve birleştirir."""
     merged: list[dict[str, str]] = []
     seen: dict[str, dict[str, str]] = {}
     tasks = [
-        (_search_yandex, (query, max_results, timeout)),
-        (_search_bing, (query, max_results, timeout)),
-        (_search_ddgs_backend, (query, "yahoo", max_results, timeout)),
-        (_search_ddgs_backend, (query, "duckduckgo", max_results, timeout)),
+        (_search_yandex, (query, max_results, timeout, page)),
+        (_search_bing, (query, max_results, timeout, page)),
+        (_search_ddgs_backend, (query, "yahoo", max_results, timeout, page)),
+        (_search_ddgs_backend, (query, "duckduckgo", max_results, timeout, page)),
     ]
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         futs = [pool.submit(fn, *args) for fn, args in tasks]
@@ -1292,52 +1295,108 @@ def _resolve_tender_contractors(
     return results
 
 
+def _build_round_queries(
+    item_name: str, intel: dict[str, Any], round_num: int
+) -> tuple[list[tuple[str, str, str, int]], list[str]]:
+    """Tur numarasına göre yeni arama sorguları ve sayfa numaralarını üretir."""
+    ust_kat = intel.get("ust_kategori") or ""
+    inferred = infer_product_groups(f"{item_name} {ust_kat}")
+    smart = build_smart_queries(item_name)
+    syns = [s for s in (intel.get("es_anlamlilar") or []) if s]
+    brands = [b for b in (intel.get("markalar") or []) if b]
+
+    if round_num <= 1:
+        gemini_b2b = [q for q in (intel.get("b2b_sorgular") or []) if q]
+        ring1 = list(dict.fromkeys(gemini_b2b + smart["queries"]))[:6]
+        ring2 = [f"{ust_kat} türkiye tedarikçi iletişim"] if ust_kat else []
+        for g in inferred[:2]:
+            ring2.extend(PRODUCT_GROUPS[g]["queries"][:1])
+        ring3 = [f"{m} türkiye distribütör iletişim" for m in brands[:2]]
+        specs = (
+            [(q, "Web Arama (B2B)", "1. Halka (6 B2B Sorgu)", 15) for q in ring1]
+            + [(q, "Web Arama (Kategori)", "2. Halka (Üst Kategori)", 12) for q in list(dict.fromkeys(ring2))[:3]]
+            + [(q, "Marka Taraması", "3. Halka (Marka)", 10) for q in ring3]
+            + [(q, "Rehber Taraması", "Rehber (firmasec/bulurum)", 12) for q in smart["directory_queries"]]
+            + [(q, "İhale Sonuç Taraması", "İhale (ilan.gov.tr/ihalebul)", 10) for q in smart["tender_queries"]]
+        )
+        return specs, inferred
+
+    # 2. ve sonraki turlar için yeni varyasyonlar ve sonraki sayfa taramaları
+    syn_a = syns[0] if syns else item_name
+    syn_b = syns[1] if len(syns) > 1 else syn_a
+    if round_num == 2:
+        extra_b2b = [
+            f"{syn_a} toptan satış fiyat teklif iletişim",
+            f"{syn_b} ithalatçı ana bayi türkiye",
+            f"{item_name} toptancı istanbul ankara izmir iletişim",
+            f'{syn_a} ("teklif@" OR "satis@" OR "ihale@")',
+            f"{ust_kat or item_name} yetkili satıcı firma rehberi",
+            f"{brands[0]} türkiye yetkili satıcı iletişim" if brands else f"{item_name} medikal firma iletişim",
+        ]
+        extra_dir = [f"site:firmasec.com {syn_a}", f"site:bulurum.com {syn_a}"]
+        extra_tender = [f"site:ilan.gov.tr {syn_a} yüklenici", f"site:ihalebul.com {syn_a}"]
+    else:
+        cities = ["istanbul", "ankara", "izmir", "bursa", "antalya", "konya"]
+        city_hint = cities[(round_num - 3) % len(cities)]
+        syn_pick = syns[(round_num - 1) % len(syns)] if syns else item_name
+        extra_b2b = [
+            f"{syn_pick} tedarikçi {city_hint} iletişim",
+            f"{item_name} sanayi ticaret limited şirketi iletişim",
+            f'{item_name} ("kurumsal@" OR "info@" OR "satis@") {city_hint}',
+            f"{ust_kat or syn_pick} toptan tedarikçi türkiye",
+            f"{brands[(round_num - 1) % len(brands)]} türkiye distribütör" if brands else f"{syn_pick} imalatçı firma",
+        ]
+        extra_dir = [f"site:firmasec.com {syn_pick} {city_hint}", f"site:bulurum.com {syn_pick} {city_hint}"]
+        extra_tender = [f"site:ilan.gov.tr {syn_pick}", f"site:ihalebul.com {syn_pick} sonuç"]
+
+    specs = (
+        [(q, f"Web Arama ({round_num}. Tur)", f"{round_num}. Tur (Yeni Sorgu)", 15) for q in list(dict.fromkeys(extra_b2b))]
+        + [(q, f"Rehber ({round_num}. Tur)", "Rehber (firmasec/bulurum)", 12) for q in extra_dir]
+        + [(q, f"İhale ({round_num}. Tur)", "İhale (ilan.gov.tr/ihalebul)", 10) for q in extra_tender]
+    )
+    return specs, inferred
+
+
 def run_three_ring_search(
     item_name: str,
     intel: dict[str, Any],
     cache: dict[str, dict[str, Any]],
     progress_cb: Any = None,
     max_sites: int = DEFAULT_MAX_SITES,
+    round_num: int = 1,
+    skip_domains: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Önce havuzdan eşleşen firmaları getirir; ardından çoklu arama motoru (Yandex/Bing/Yahoo/DDG), 6 B2B sorgu, rehber ve ihale sonuçlarını tarar."""
+    """Önce havuzdan eşleşen firmaları getirir; ardından çoklu arama motoru (Yandex/Bing/Yahoo/DDG), 6 B2B sorgu, rehber ve ihale sonuçlarını turlar halinde tarar."""
     ust_kat = intel.get("ust_kategori") or ""
-    inferred = infer_product_groups(f"{item_name} {ust_kat}")
+    query_specs, inferred = _build_round_queries(item_name, intel, round_num)
     sector_tag = _standardize_sector(ust_kat, inferred) or "Kurumsal Tedarik"
 
-    # 1. Önce firma_havuzu.xlsx içindeki eşleşen firmaları getir
-    pool_hits = search_cache_pool(item_name, intel, cache)
-    results: list[dict[str, Any]] = list(pool_hits)
-    seen_domains: set[str] = {str(r.get("domain", "")).lower() for r in pool_hits if r.get("domain")}
+    seen_domains: set[str] = set(skip_domains or ())
+    results: list[dict[str, Any]] = []
 
-    smart = build_smart_queries(item_name)
-    gemini_b2b = [q for q in (intel.get("b2b_sorgular") or []) if q]
-    ring1 = list(dict.fromkeys(gemini_b2b + smart["queries"]))[:6]
-    ring2 = [f"{ust_kat} türkiye tedarikçi iletişim"] if ust_kat else []
-    for g in inferred[:2]:
-        ring2.extend(PRODUCT_GROUPS[g]["queries"][:1])
-    ring3 = [f"{m} türkiye distribütör iletişim" for m in (intel.get("markalar") or [])[:2]]
-    ring_tender = smart["tender_queries"]
-    ring_dir = smart["directory_queries"]
-
-    query_specs: list[tuple[str, str, str, int]] = (
-        [(q, "Web Arama (B2B)", "1. Halka (6 B2B Sorgu)", 15) for q in ring1]
-        + [(q, "Web Arama (Kategori)", "2. Halka (Üst Kategori)", 12) for q in list(dict.fromkeys(ring2))[:3]]
-        + [(q, "Marka Taraması", "3. Halka (Marka)", 10) for q in ring3]
-        + [(q, "Rehber Taraması", "Rehber (firmasec/bulurum)", 12) for q in ring_dir]
-        + [(q, "İhale Sonuç Taraması", "İhale (ilan.gov.tr/ihalebul)", 10) for q in ring_tender]
-    )
+    # 1. Turda önce firma_havuzu.xlsx içindeki eşleşen firmaları getir
+    if round_num <= 1:
+        pool_hits = search_cache_pool(item_name, intel, cache)
+        for ph in pool_hits:
+            pdom = str(ph.get("domain", "")).lower()
+            if pdom and pdom in seen_domains:
+                continue
+            if pdom:
+                seen_domains.add(pdom)
+            results.append(ph)
 
     if progress_cb:
-        progress_cb(f"{item_name}: Havuzdan {len(pool_hits)} firma geldi · {len(query_specs)} sorgu 4 motorda taranıyor...")
+        progress_cb(f"{item_name} ({round_num}. Tur): {len(results)} havuz kaydı · {len(query_specs)} sorgu 4 motorda taranıyor...")
 
     candidate_domains: dict[str, tuple[str, str]] = {}
     snippet_fallbacks: dict[str, dict[str, Any]] = {}
     directory_hits: list[dict[str, str]] = []
     tender_hits: list[dict[str, str]] = []
     seen_special_urls: set[str] = set()
+    search_page = max(1, round_num)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as qpool:
-        q_futs = {qpool.submit(search_multi_engine, q, mr, DEFAULT_TIMEOUT): (sl, mt) for q, sl, mt, mr in query_specs}
+        q_futs = {qpool.submit(search_multi_engine, q, mr, DEFAULT_TIMEOUT, search_page): (sl, mt) for q, sl, mt, mr in query_specs}
         for qfut in concurrent.futures.as_completed(q_futs):
             sl, mt = q_futs[qfut]
             for res in qfut.result():
@@ -1357,6 +1416,8 @@ def run_three_ring_search(
                         seen_special_urls.add(href)
                         directory_hits.append(res)
                     continue
+                if dom in seen_domains:
+                    continue
 
                 candidate_domains.setdefault(dom, (sl, mt))
                 txt = f"{res.get('title', '')} {res.get('body', '')}"
@@ -1369,6 +1430,8 @@ def run_three_ring_search(
     # Rehber (firmasec / bulurum) leadlerini çıkar
     dir_web_cands, dir_direct_leads = _extract_directory_leads(directory_hits, item_name, sector_tag, inferred, timeout=DEFAULT_TIMEOUT)
     for edom, d_sl, d_mt, d_em, d_ph, d_hint in dir_web_cands:
+        if edom in seen_domains:
+            continue
         candidate_domains.setdefault(edom, (d_sl, d_mt))
         fb = snippet_fallbacks.setdefault(edom, {"emails": set(), "phones": [], "title": d_hint, "url": f"https://{edom}"})
         fb["emails"].update(d_em)
@@ -1379,10 +1442,12 @@ def run_three_ring_search(
         ldom = lead["domain"]
         if ldom not in seen_domains:
             seen_domains.add(ldom)
+            if skip_domains is not None:
+                skip_domains.add(ldom)
             _merge_firm_into_cache(cache, lead, sector_tag, inferred)
             results.append(lead)
 
-    # Aday web sitelerini (max 120) havuz kontrolü ve kazıma ile işle
+    # Aday web sitelerini (max 120/tur) daha önce taranmayanları seçerek kazıma ile işle
     to_fetch: list[tuple[str, str, str]] = []
     for dom, (sl, mt) in candidate_domains.items():
         if dom in seen_domains:
@@ -1392,6 +1457,8 @@ def run_three_ring_search(
             _merge_firm_into_cache(cache, hit, sector_tag, inferred)
             hit.update({"item": item_name, "source": f"{sl} (Önbellek)", "match_type": mt})
             seen_domains.add(dom)
+            if skip_domains is not None:
+                skip_domains.add(dom)
             results.append(hit)
         else:
             to_fetch.append((dom, sl, mt))
@@ -1402,6 +1469,9 @@ def run_three_ring_search(
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
             futs = {}
             for dom, sl, mt in to_fetch:
+                if skip_domains is not None:
+                    skip_domains.add(dom)
+                seen_domains.add(dom)
                 fb = snippet_fallbacks.get(dom, {})
                 futs[
                     pool.submit(
@@ -1419,7 +1489,7 @@ def run_three_ring_search(
                 done += 1
                 dom, sl, mt = futs[fut]
                 if progress_cb:
-                    progress_cb(f"{item_name}: {done}/{total} site tarandı ({dom})")
+                    progress_cb(f"{item_name} ({round_num}. Tur): {done}/{total} yeni site tarandı ({dom})")
                 info = fut.result()
                 fb = snippet_fallbacks.get(dom)
                 if not info.get("status", "").startswith("Aktif"):
@@ -1444,7 +1514,6 @@ def run_three_ring_search(
                     "item": item_name, "source": sl, "match_type": mt,
                     "sector": sector_tag, "last_checked": dt.date.today().isoformat(),
                 })
-                seen_domains.add(dom)
                 _merge_firm_into_cache(cache, info, sector_tag, inferred)
                 results.append(info)
 
@@ -1456,6 +1525,8 @@ def run_three_ring_search(
         tdom = str(tc.get("domain", "")).lower()
         if tdom and tdom not in seen_domains:
             seen_domains.add(tdom)
+            if skip_domains is not None:
+                skip_domains.add(tdom)
             _merge_firm_into_cache(cache, tc, sector_tag, inferred)
             results.append(tc)
 
@@ -1634,21 +1705,235 @@ def build_excel_bytes(rows: list[dict[str, Any]]) -> bytes:
     return buf.getvalue()
 
 
-def build_rfq_draft(items: list[str]) -> tuple[str, str]:
-    items_str = "\n".join(f"- {it}" for it in items)
-    subject = f"4734/22-d Doğrudan Temin Piyasa Fiyat Araştırması — {', '.join(items[:2])}"
-    body = (
-        "Sayın Yetkili,\n\n"
-        "Hastanemiz ihtiyacı doğrultusunda 4734 sayılı Kamu İhale Kanunu'nun 22/d maddesi kapsamında "
-        "Doğrudan Temin / Piyasa Fiyat Araştırması yapılacaktır.\n\n"
-        "Aşağıda belirtilen kalem(ler) için KDV hariç birim fiyat teklifinizi, marka/model bilgisini, "
-        "teslim süresini ve varsa ÜTS/teknik doküman bilgilerinizi kaşeli ve imzalı olarak "
-        "tarafımıza iletmenizi rica ederiz:\n\n"
-        f"{items_str}\n\n"
-        "İyi çalışmalar dileriz.\n"
-        "Satın Alma Birimi"
+SERVICE_KEYWORDS = (
+    "bakım", "bakim", "onarım", "onarim", "kalibrasyon", "servis", "kiralama",
+    "hizmet", "danışmanlık", "egitim", "eğitim", "temizlik", "güvenlik",
+    "nakliye", "taşıma", "montaj", "periyodik", "ölçüm", "analiz", "yazılım",
+)
+
+
+def detect_procurement_type(items: list[str]) -> str:
+    """Kalem adlarına bakarak alım türünü 'Hizmet' veya 'Malzeme' olarak otomatik algılar."""
+    joined = _tr_lower(" ".join(items))
+    return "Hizmet" if any(kw in joined for kw in SERVICE_KEYWORDS) else "Malzeme"
+
+
+def build_invitation_text(deadline_date: str = "", deadline_time: str = "") -> tuple[str, str]:
+    """Resmi Yazışma Usullerine uygun teklife davet mektubu metnini döndürür."""
+    d_str = deadline_date.strip() or "..../..../2026"
+    t_str = deadline_time.strip() or "...:..."
+    p1 = (
+        "Hastanemiz bünyesinde hizmet vermekte olan ilgili birimlerde aktif olarak kullanılan ve temin ihtiyacı bulunan, "
+        "aşağıda belirtilen kalemlere ilişkin teknik şartname detaylarını incelemenizi; teklif vereceğiniz kalemlere ait "
+        "fiyat teklifinizi hazırlayarak teknik şartname ve teklif mektubunu firma kaşesi ile yetkili kişi imzası ile birlikte "
+        f"{d_str} tarihi saat {t_str}'e kadar elden ve/veya ufuk.tonguc@saglik.gov.tr e-posta adresine ulaştırmanızı hususunda;"
     )
+    p2 = "Gereğini bilgilerinize rica ederim."
+    return p1, p2
+
+
+def build_rfq_draft(items: list[str], deadline_date: str = "", deadline_time: str = "") -> tuple[str, str]:
+    items_str = "\n".join(f"- {idx}. {it}" for idx, it in enumerate(items, 1))
+    p1, p2 = build_invitation_text(deadline_date, deadline_time)
+    subject = f"4734/22-d Doğrudan Temin Teklife Davet — {', '.join(items[:2])}"
+    body = f"Sayın Yetkili,\n\n{p1}\n{p2}\n\nKalemler:\n{items_str}\n\nSatın Alma Birimi"
     return subject, body
+
+
+def build_default_invitation_rows(
+    items: list[str],
+    procurement_type: str,
+    intel_map: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Kalemlerden Teklife Davet tablosu için başlangıç satırlarını üretir."""
+    rows: list[dict[str, Any]] = []
+    intel_map = intel_map or {}
+    is_service = procurement_type == "Hizmet"
+    name_col = "Hizmetin Adı ve Açıklaması" if is_service else "Malzeme Kaleminin Adı"
+    for idx, item in enumerate(items, 1):
+        desc_text = item
+        if is_service:
+            aciklama = (intel_map.get(item) or {}).get("aciklama", "").strip()
+            if aciklama:
+                first_sent = aciklama.split(".")[0].strip()
+                if first_sent and _tr_lower(first_sent) != _tr_lower(item):
+                    desc_text = f"{item} — {first_sent}."
+        rows.append({
+            "Sıra No": idx,
+            name_col: desc_text,
+            "Birim": "Hizmet" if is_service else "Adet",
+            "Miktar": "",
+            "Birim Fiyat": "",
+            "Toplam Fiyat": "",
+        })
+    return rows
+
+
+def build_invitation_docx(
+    table_rows: list[dict[str, Any]],
+    procurement_type: str,
+    deadline_date: str = "",
+    deadline_time: str = "",
+) -> bytes:
+    """Resmi Yazışma Usullerine uygun (Times New Roman 12pt, iki yana yaslı) Teklife Davet Mektubu Word (.docx) üretir."""
+    import docx
+    from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement, parse_xml
+    from docx.oxml.ns import nsdecls, qn
+    from docx.shared import Cm, Pt, RGBColor
+
+    doc = docx.Document()
+    for sec in doc.sections:
+        sec.page_width = Cm(21.0)
+        sec.page_height = Cm(29.7)
+        sec.top_margin = Cm(2.5)
+        sec.bottom_margin = Cm(2.2)
+        sec.left_margin = Cm(2.0)
+        sec.right_margin = Cm(2.0)
+
+    def apply_tnr(run: Any, size_pt: int = 12, bold: bool = False) -> None:
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(size_pt)
+        run.bold = bold
+        run.font.color.rgb = RGBColor(0, 0, 0)
+        rpr = run._r.get_or_add_rPr()
+        rfonts = rpr.find(qn("w:rFonts"))
+        if rfonts is None:
+            rfonts = OxmlElement("w:rFonts")
+            rpr.insert(0, rfonts)
+        for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+            rfonts.set(qn(attr), "Times New Roman")
+
+    normal_style = doc.styles["Normal"]
+    normal_style.font.name = "Times New Roman"
+    normal_style.font.size = Pt(12)
+
+    # Üst Başlık
+    h1 = doc.add_paragraph()
+    h1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    h1.paragraph_format.space_after = Pt(2)
+    apply_tnr(h1.add_run("T.C.\nSAĞLIK BAKANLIĞI\nSATIN ALMA BİRİMİ"), size_pt=12, bold=True)
+
+    h2 = doc.add_paragraph()
+    h2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    h2.paragraph_format.space_before = Pt(6)
+    h2.paragraph_format.space_after = Pt(12)
+    apply_tnr(h2.add_run("TEKLİFE DAVET MEKTUBU"), size_pt=12, bold=True)
+
+    # Konu / Tarih satırı
+    meta = doc.add_paragraph()
+    meta.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    meta.paragraph_format.space_after = Pt(10)
+    apply_tnr(meta.add_run("Konu: "), size_pt=12, bold=True)
+    apply_tnr(
+        meta.add_run(f"4734/22-d Doğrudan Temin Piyasa Fiyat Araştırması ({procurement_type} Alımı)"),
+        size_pt=12,
+        bold=False,
+    )
+
+    # Resmi Metin (Times New Roman 12 punto, iki yana yaslı)
+    p1_text, p2_text = build_invitation_text(deadline_date, deadline_time)
+    body_p1 = doc.add_paragraph()
+    body_p1.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    body_p1.paragraph_format.line_spacing = 1.15
+    body_p1.paragraph_format.first_line_indent = Cm(1.0)
+    body_p1.paragraph_format.space_after = Pt(6)
+    apply_tnr(body_p1.add_run(p1_text), size_pt=12, bold=False)
+
+    body_p2 = doc.add_paragraph()
+    body_p2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    body_p2.paragraph_format.first_line_indent = Cm(1.0)
+    body_p2.paragraph_format.space_after = Pt(14)
+    apply_tnr(body_p2.add_run(p2_text), size_pt=12, bold=False)
+
+    # Kalem Tablosu
+    second_col = "Hizmetin Adı ve Açıklaması" if procurement_type == "Hizmet" else "Malzeme Kaleminin Adı"
+    headers = ["Sıra No", second_col, "Birim", "Miktar", "Birim Fiyat", "Toplam Fiyat"]
+    col_widths = [Cm(1.3), Cm(7.2), Cm(1.8), Cm(1.8), Cm(2.4), Cm(2.5)]
+
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+
+    # Tüm kenarlıklar çizili tablo XML'i
+    tbl_pr = table._tbl.tblPr
+    borders = parse_xml(
+        f'<w:tblBorders {nsdecls("w")}>'
+        '<w:top w:val="single" w:sz="6" w:space="0" w:color="000000"/>'
+        '<w:left w:val="single" w:sz="6" w:space="0" w:color="000000"/>'
+        '<w:bottom w:val="single" w:sz="6" w:space="0" w:color="000000"/>'
+        '<w:right w:val="single" w:sz="6" w:space="0" w:color="000000"/>'
+        '<w:insideH w:val="single" w:sz="6" w:space="0" w:color="000000"/>'
+        '<w:insideV w:val="single" w:sz="6" w:space="0" w:color="000000"/>'
+        "</w:tblBorders>"
+    )
+    tbl_pr.append(borders)
+
+    def format_cell(cell: Any, text: str, width: Any, align: Any, bold: bool = False, shade: str = "") -> None:
+        cell.width = width
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        if shade:
+            cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{shade}"/>'))
+        p = cell.paragraphs[0]
+        p.alignment = align
+        p.paragraph_format.space_before = Pt(2)
+        p.paragraph_format.space_after = Pt(2)
+        apply_tnr(p.add_run(str(text)), size_pt=11, bold=bold)
+
+    # Başlık Satırı
+    hdr_row = table.rows[0]
+    hdr_row._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    hdr_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+    for i, h_title in enumerate(headers):
+        format_cell(hdr_row.cells[i], h_title, col_widths[i], WD_ALIGN_PARAGRAPH.CENTER, bold=True, shade="E2E8F0")
+
+    # Veri Satırları (Sıra No otomatik 1'den başlayarak artar)
+    for idx, row_data in enumerate(table_rows, 1):
+        row = table.add_row()
+        row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        item_val = row_data.get(second_col) or row_data.get("Malzeme Kaleminin Adı") or row_data.get("Hizmetin Adı ve Açıklaması") or ""
+        vals = [
+            str(idx),
+            str(item_val),
+            str(row_data.get("Birim") or ""),
+            str(row_data.get("Miktar") or ""),
+            str(row_data.get("Birim Fiyat") or ""),
+            str(row_data.get("Toplam Fiyat") or ""),
+        ]
+        aligns = [
+            WD_ALIGN_PARAGRAPH.CENTER,
+            WD_ALIGN_PARAGRAPH.LEFT,
+            WD_ALIGN_PARAGRAPH.CENTER,
+            WD_ALIGN_PARAGRAPH.CENTER,
+            WD_ALIGN_PARAGRAPH.RIGHT,
+            WD_ALIGN_PARAGRAPH.RIGHT,
+        ]
+        for i, val in enumerate(vals):
+            format_cell(row.cells[i], val, col_widths[i], aligns[i], bold=False)
+
+    # Genel Toplam Satırı
+    total_row = table.add_row()
+    total_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+    merged_cell = total_row.cells[0].merge(total_row.cells[4])
+    format_cell(merged_cell, "GENEL TOPLAM (KDV Hariç)", sum(col_widths[:5], Cm(0)), WD_ALIGN_PARAGRAPH.RIGHT, bold=True, shade="F8FAFC")
+    format_cell(total_row.cells[5], "", col_widths[5], WD_ALIGN_PARAGRAPH.RIGHT, bold=True, shade="F8FAFC")
+
+    # Sağ alt kısım: Teklif Veren Firma Kaşe / Yetkili İmza
+    spacer = doc.add_paragraph()
+    spacer.paragraph_format.space_before = Pt(18)
+    spacer.paragraph_format.space_after = Pt(4)
+
+    sign_p = doc.add_paragraph()
+    sign_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    sign_p.paragraph_format.space_before = Pt(12)
+    apply_tnr(sign_p.add_run("Teklif Veren Firma Kaşe / Yetkili İmza\n\n"), size_pt=12, bold=True)
+    apply_tnr(sign_p.add_run("Adı Soyadı / Ünvanı : ...........................................\n"), size_pt=12, bold=False)
+    apply_tnr(sign_p.add_run("Tarih               : .... / .... / 2026"), size_pt=12, bold=False)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -1668,7 +1953,7 @@ def main() -> None:
                 <h1>🏥 Kamu Satın Alma | Akıllı Tedarikçi & Teklif Havuzu</h1>
                 <p>4734/22-d Piyasa Fiyat Araştırması · Yandex/Bing/Yahoo/DDG Çoklu Motor + İhale/Rehber + Gemini B2B</p>
             </div>
-            <div class="erp-badge">⚡ Güçlü Mod · max 120 site / timeout 6s</div>
+            <div class="erp-badge">⚡ Çoklu Tur · 120 / 240 / 360 site · timeout 6s</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1686,11 +1971,18 @@ def main() -> None:
         )
     with col_file:
         uploaded = st.file_uploader("Talep Formu veya MKYS Dosyası Yükle (.docx, .xlsx, .csv, .pdf)", type=["docx", "xlsx", "xlsm", "csv", "pdf", "txt"])
-        c_opt1, c_opt2 = st.columns(2)
+        c_opt1, c_opt2, c_opt3 = st.columns([1, 1, 1.15])
         with c_opt1:
             use_gemini = st.checkbox("Gemini Flash Analizi", value=bool(gemini_key))
         with c_opt2:
             mode_mkys = st.checkbox("MKYS Firmalarını Tara", value=False)
+        with c_opt3:
+            site_limit_opt = st.selectbox(
+                "Hedef Site Turu",
+                options=[120, 240, 360],
+                format_func=lambda n: f"{n} Site ({n // 120} Tur)",
+                index=0,
+            )
 
     btn_col1, btn_col2 = st.columns([4, 1])
     with btn_col1:
@@ -1718,6 +2010,8 @@ def main() -> None:
         ai_cache = load_ai_cache()
         all_rows: list[dict[str, Any]] = []
         intel_map: dict[str, dict[str, Any]] = {}
+        visited_domains: set[str] = set()
+        target_rounds = max(1, site_limit_opt // DEFAULT_MAX_SITES)
         progress_bar = st.progress(0)
         status_slot = st.empty()
 
@@ -1726,41 +2020,107 @@ def main() -> None:
             item_label = items[0] if items else "MKYS Havuz"
             status_slot.info(f"⏳ MKYS dosyasından {len(details)} firma taranıyor...")
             all_rows = resolve_mkys_companies(details, item_label, cache, progress_cb=lambda m: status_slot.info(f"⏳ {m}"))
+            visited_domains.update(str(r.get("domain", "")).lower() for r in all_rows if r.get("domain"))
             progress_bar.progress(100)
         else:
             if not items:
                 status_slot.empty()
                 st.warning("Lütfen en az bir kalem yazın veya bir dosya yükleyin.")
                 return
-            total = len(items)
+            total_steps = len(items) * target_rounds
+            step_done = 0
             for idx, item in enumerate(items, start=1):
-                status_slot.info(f"⏳ [{idx}/{total}] **{item}** — Yapay zeka analizi yapılıyor...")
+                status_slot.info(f"⏳ [{idx}/{len(items)}] **{item}** — Yapay zeka analizi yapılıyor...")
                 intel = analyze_item_with_gemini(item, gemini_key if use_gemini else "", ai_cache)
                 intel_map[item] = intel
-                item_rows = run_three_ring_search(
-                    item, intel, cache, progress_cb=lambda m, i=idx: status_slot.info(f"⏳ [{i}/{total}] {m}"), max_sites=DEFAULT_MAX_SITES
-                )
-                all_rows.extend(item_rows)
-                save_cache(CACHE_XLSX, cache)
-                progress_bar.progress(int((idx / total) * 100))
+                item_visited: set[str] = set()
+                for r_num in range(1, target_rounds + 1):
+                    item_rows = run_three_ring_search(
+                        item,
+                        intel,
+                        cache,
+                        progress_cb=lambda m, i=idx: status_slot.info(f"⏳ [{i}/{len(items)}] {m}"),
+                        max_sites=DEFAULT_MAX_SITES,
+                        round_num=r_num,
+                        skip_domains=item_visited,
+                    )
+                    all_rows.extend(item_rows)
+                    visited_domains.update(item_visited)
+                    save_cache(CACHE_XLSX, cache)
+                    step_done += 1
+                    progress_bar.progress(int((step_done / total_steps) * 100))
 
         all_rows.sort(key=lambda r: (r.get("item", ""), 0 if r.get("primary_email") else 1, r.get("company_name", "")))
         save_cache(CACHE_XLSX, cache)
         elapsed = round(time.time() - t0, 1)
-        status_slot.success(f"✅ Tarama {elapsed} saniyede tamamlandı ({len(all_rows)} aktif kayıt).")
+        status_slot.success(f"✅ {target_rounds} tur tarama {elapsed} saniyede tamamlandı ({len(all_rows)} aktif kayıt).")
 
         st.session_state["last_rows"] = all_rows
         st.session_state["last_items"] = items or ["MKYS Havuz"]
         st.session_state["last_intel"] = intel_map
         st.session_state["last_elapsed"] = elapsed
+        st.session_state["visited_domains"] = visited_domains
+        st.session_state["current_round"] = target_rounds
+        st.session_state["last_is_mkys"] = bool(mode_mkys and parsed_file.get("company_details"))
+        st.session_state.pop("round_status_msg", None)
 
     rows = st.session_state.get("last_rows")
     if rows is None:
         return
 
+    if st.session_state.get("round_status_msg"):
+        st.success(st.session_state["round_status_msg"])
+
     last_items = st.session_state.get("last_items") or []
     intel_map = st.session_state.get("last_intel") or {}
     elapsed_sec = st.session_state.get("last_elapsed", 0.0)
+    current_round = st.session_state.get("current_round", 1)
+    visited_domains = st.session_state.get("visited_domains") or set()
+
+    # Sonraki Tur (+120 Site) Döngüsü
+    if not st.session_state.get("last_is_mkys") and last_items:
+        next_round = current_round + 1
+        if st.button(f"🔄 120 Site Daha Tara (Sonraki Tur — {next_round}. Tur)", use_container_width=True):
+            t_next = time.time()
+            cache = load_cache(CACHE_XLSX)
+            ai_cache = load_ai_cache()
+            progress_bar = st.progress(0)
+            status_slot = st.empty()
+            existing_keys = {(r.get("item", ""), str(r.get("domain", "")).lower()) for r in rows}
+            new_found: list[dict[str, Any]] = []
+            for idx, item in enumerate(last_items, start=1):
+                intel = intel_map.get(item) or analyze_item_with_gemini(item, gemini_key if use_gemini else "", ai_cache)
+                intel_map[item] = intel
+                item_skip = set(visited_domains)
+                extra_rows = run_three_ring_search(
+                    item,
+                    intel,
+                    cache,
+                    progress_cb=lambda m, i=idx: status_slot.info(f"⏳ [{i}/{len(last_items)}] {m}"),
+                    max_sites=DEFAULT_MAX_SITES,
+                    round_num=next_round,
+                    skip_domains=item_skip,
+                )
+                visited_domains.update(item_skip)
+                for er in extra_rows:
+                    ek = (er.get("item", ""), str(er.get("domain", "")).lower())
+                    if ek not in existing_keys:
+                        existing_keys.add(ek)
+                        new_found.append(er)
+                save_cache(CACHE_XLSX, cache)
+                progress_bar.progress(int((idx / len(last_items)) * 100))
+
+            merged_rows = list(rows) + new_found
+            merged_rows.sort(key=lambda r: (r.get("item", ""), 0 if r.get("primary_email") else 1, r.get("company_name", "")))
+            elapsed_extra = round(time.time() - t_next, 1)
+            st.session_state["last_rows"] = merged_rows
+            st.session_state["last_intel"] = intel_map
+            st.session_state["visited_domains"] = visited_domains
+            st.session_state["current_round"] = next_round
+            st.session_state["last_elapsed"] = round(elapsed_sec + elapsed_extra, 1)
+            st.session_state["round_status_msg"] = f"✅ {next_round}. tur tamamlandı: +{len(new_found)} yeni firma tabloya eklendi ve firma_havuzu.xlsx güncellendi."
+            st.rerun()
+
     df = rows_to_dataframe(rows)
     bcc_emails = collect_bcc_emails(rows)
 
@@ -1769,7 +2129,7 @@ def main() -> None:
         (k1, "Aranan Kalem", len(last_items)),
         (k2, "Bulunan Firma", len(df)),
         (k3, "Aktif E-Posta", len(bcc_emails)),
-        (k4, "İşlem Süresi", f"{elapsed_sec} sn"),
+        (k4, f"Süre ({current_round}. Tur)", f"{elapsed_sec} sn"),
     ]:
         col.markdown(f'<div class="kpi-card"><div class="kpi-label">{label}</div><div class="kpi-value">{val}</div></div>', unsafe_allow_html=True)
 
@@ -1788,7 +2148,7 @@ def main() -> None:
                     unsafe_allow_html=True,
                 )
 
-    tab1, tab2, tab3 = st.tabs(["🏢 Tedarikçi Tablosu", "✉️ Toplu Mail (BCC) & 4734/22-d Taslağı", "📥 İndir (CSV & Excel)"])
+    tab1, tab2, tab3 = st.tabs(["🏢 Tedarikçi Tablosu", "✉️ Toplu Mail (BCC) & Resmi Teklife Davet", "📥 İndir (CSV & Excel)"])
 
     with tab1:
         if df.empty:
@@ -1797,7 +2157,7 @@ def main() -> None:
             st.dataframe(df, use_container_width=True, height=420, hide_index=True, column_config={"Web Sitesi": st.column_config.LinkColumn("Web Sitesi")})
 
     with tab2:
-        col_bcc, col_draft = st.columns(2)
+        col_bcc, col_draft = st.columns([0.95, 1.35])
         with col_bcc:
             st.markdown("**Tek Tıkla Kopyalanabilir BCC Mail Listesi (KEP Hariç)**")
             if not bcc_emails:
@@ -1806,11 +2166,49 @@ def main() -> None:
                 st.caption("Sağ üstteki kopyala ikonuna basıp Outlook/Zimbra 'Gizli (BCC)' alanına yapıştırın:")
                 st.code("; ".join(bcc_emails), language=None)
                 st.text_area("Alt Alta Mail Listesi", value="\n".join(bcc_emails), height=150)
-        with col_draft:
-            st.markdown("**4734 / 22-d Teklif İsteme Maili Taslağı**")
-            subj, body = build_rfq_draft(last_items)
+
+            subj, mail_body = build_rfq_draft(last_items)
+            st.markdown("**E-posta Konusu & Kısa Gövde**")
             st.text_input("Konu", value=subj)
-            st.text_area("Mail Metni", value=body, height=210)
+            st.text_area("Mail Metni", value=mail_body, height=180)
+
+        with col_draft:
+            st.markdown("**📄 Resmi Teklife Davet Mektubu ve Word (.docx) Çıktısı**")
+            detected_type = detect_procurement_type(last_items)
+            c_t1, c_t2, c_t3 = st.columns([1.1, 1, 1])
+            with c_t1:
+                proc_type = st.radio(
+                    f"Alım Türü (Algılanan: {detected_type})",
+                    options=["Malzeme", "Hizmet"],
+                    index=0 if detected_type == "Malzeme" else 1,
+                    horizontal=True,
+                )
+            with c_t2:
+                deadline_date = st.text_input("Son Teklif Tarihi", value="", placeholder="..../..../2026")
+            with c_t3:
+                deadline_time = st.text_input("Son Teklif Saati", value="", placeholder="...:...")
+
+            p1_txt, p2_txt = build_invitation_text(deadline_date, deadline_time)
+            st.info(f"{p1_txt}\n\n{p2_txt}")
+
+            default_inv_rows = build_default_invitation_rows(last_items, proc_type, intel_map)
+            st.caption("Kalem tablosunu indireceğiniz Word belgesi öncesinde düzenleyebilirsiniz (Sıra No otomatik artar):")
+            edited_inv_df = st.data_editor(
+                pd.DataFrame(default_inv_rows),
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key=f"inv_editor_{proc_type}_{len(last_items)}",
+            )
+            inv_rows = edited_inv_df.to_dict(orient="records")
+            docx_bytes = build_invitation_docx(inv_rows, proc_type, deadline_date, deadline_time)
+            st.download_button(
+                "📄 Resmi Teklife Davet Mektubunu İndir (.docx)",
+                data=docx_bytes,
+                file_name="teklife_davet_mektubu.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
 
     with tab3:
         if df.empty:
