@@ -44,15 +44,27 @@ HEADERS = {
 }
 
 MARKETPLACE_DOMAINS = {
-    "trendyol.com", "hepsiburada.com", "n11.com", "amazon.com.tr", "amazon.com",
-    "ciceksepeti.com", "pazarama.com", "pttavm.com", "epttavm.com", "akakce.com",
-    "cimri.com", "sahibinden.com", "idefix.com", "alibaba.com", "aliexpress.com",
-    "ebay.com", "etsy.com", "wikipedia.org", "youtube.com", "medikalnews.com",
-    "medikalfirma.com", "beymen.com", "ebebek.com", "doktortakvimi.com",
-    "sikayetvar.com", "yandex.com.tr", "yandex.com", "google.com",
+    "trendyol.com", "trendyolmilla.com", "hepsiburada.com", "n11.com",
+    "amazon.com.tr", "amazon.com", "ciceksepeti.com", "pazarama.com",
+    "pttavm.com", "epttavm.com", "akakce.com", "cimri.com", "sahibinden.com",
+    "idefix.com", "alibaba.com", "aliexpress.com", "ebay.com", "etsy.com",
+    "teknosa.com", "vatanbilgisayar.com", "mediamarkt.com.tr", "migros.com.tr",
+    "a101.com.tr", "bim.com.tr", "sokmarket.com.tr", "koctas.com.tr",
+    "bauhaus.com.tr", "decathlon.com.tr", "morhipo.com", "boyner.com.tr",
+    "kitapyurdu.com", "dr.com.tr", "wikipedia.org", "youtube.com",
+    "medikalnews.com", "medikalfirma.com", "beymen.com", "ebebek.com",
+    "doktortakvimi.com", "sikayetvar.com", "yandex.com.tr", "yandex.com",
+    "google.com", "bing.com", "yahoo.com", "duckduckgo.com",
+    "zhihu.com", "researchgate.net", "quora.com", "reddit.com", "pinterest.com",
+    "support.google.com", "apple.com", "microsoft.com",
 }
-SOCIAL_DOMAINS = {"linkedin.com", "instagram.com", "facebook.com", "x.com", "twitter.com"}
+SOCIAL_DOMAINS = {"linkedin.com", "instagram.com", "facebook.com", "x.com", "twitter.com", "tiktok.com"}
+DIRECTORY_DOMAINS = {"firmasec.com", "bulurum.com"}
+TENDER_RESULT_DOMAINS = {"ilan.gov.tr", "ihalebul.com"}
 TENDER_PORTAL_HINTS = ("ekap.kik.gov.tr", "kik.gov.tr", "ilan.gov.tr", "ihalebul.com", "ihale.com", ".gov.tr", ".bel.tr", ".edu.tr")
+
+DEFAULT_TIMEOUT = 6
+DEFAULT_MAX_SITES = 120
 
 MAINTENANCE_KEYWORDS = (
     "bakımda", "bakimda", "yapım aşamasında", "yapim asamasinda",
@@ -65,7 +77,12 @@ EMAIL_RE = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,10}\b")
 PHONE_RE = re.compile(r"(?:\+90|0)\s*(?:\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*\d{2}[\s.\-]*\d{2})")
 YEAR_RE = re.compile(r"\b(20[1-3]\d)\b")
 COMPANY_NAME_RE = re.compile(
-    r"([A-ZÇĞİÖŞÜ][A-Za-zçğıöşüÇĞİÖŞÜ0-9&.\-\s]{2,45}?(?:Medikal|Tıbbi|Sağlık|Ltd\.?\s*Şti\.?|A\.Ş\.?|San\.?\s*Tic\.?))"
+    r"([A-ZÇĞİÖŞÜ][A-Za-zçğıöşüÇĞİÖŞÜ0-9&.,\-\s]{2,95}?"
+    r"(?:Limited\s+Şirketi|Ltd\.?\s*Şti\.?|Anonim\s+Şirketi|A\.Ş\.?|San\.?\s*(?:ve\s*)?Tic\.?(?:\s*Ltd\.?\s*Şti\.?)?|Medikal|Tıbbi|Sağlık))"
+)
+TENDER_CONTRACTOR_LABEL_RE = re.compile(
+    r"(?:Yüklenici(?:\s+Adı|\s+Firma|\s+Ünvanı|\s+Unvanı)?|İhaleyi\s+Alan|Kazanan\s+Firma|Sözleşme\s+İmzalanan(?:\s+Firma)?)\s*[:\-]\s*([^\n\r|;]{4,140})",
+    re.IGNORECASE,
 )
 
 IGNORED_EMAIL_DOMAINS = {
@@ -172,12 +189,12 @@ PRODUCT_GROUPS: dict[str, dict[str, Any]] = {
 NON_MEDICAL_GROUPS = {"Endüstriyel Kimya & Glikol", "İklimlendirme, Chiller & HVAC", "Yapı, Hırdavat & İş Güvenliği", "Temizlik, Hijyen & Mutfak"}
 
 OUTPUT_COLUMNS = [
-    "Kalem", "Firma Adı", "Eşleşme Tipi", "Kaynak", "Ürün Grupları",
+    "Kalem", "Firma Adı", "Sektör", "Eşleşme Tipi", "Kaynak", "Ürün Grupları",
     "Web Sitesi", "Öncelikli E-posta", "Tüm E-postalar", "Telefon", "Durum", "Son Güncelleme Yılı", "Notlar",
 ]
 CACHE_COLUMNS = [
     "Firma Adı", "Domain", "Web Sitesi", "Öncelikli E-posta", "Tüm E-postalar",
-    "Telefon", "Durum", "Son Güncelleme Yılı", "Son Kontrol", "Notlar", "Ürün Grupları",
+    "Telefon", "Durum", "Son Güncelleme Yılı", "Son Kontrol", "Notlar", "Ürün Grupları", "Sektör",
 ]
 
 _THREAD_LOCAL = threading.local()
@@ -466,20 +483,40 @@ def infer_product_groups(text: str) -> list[str]:
 
 
 def build_smart_queries(item_name: str) -> dict[str, Any]:
+    """Ürün adından 6 farklı B2B ve ihale/rehber/mail operatörlü arama sorgusu üretir."""
     raw = str(item_name).strip()
     paren_parts = [p.strip() for p in re.findall(r"\(([^)]+)\)", raw) if len(p.strip()) >= 3]
     outside = re.sub(r"\([^)]*\)", " ", raw)
-    outside_clean = re.sub(r"\s+", " ", re.sub(r"\b(için|icin|grubu|tipi|marka|model|adet)\b", " ", outside, flags=re.IGNORECASE)).strip()
-    terms = [t for t in ([outside_clean] + paren_parts) if t]
+    outside_clean = re.sub(
+        r"\s+", " ", re.sub(r"\b(için|icin|grubu|tipi|marka|model|adet)\b", " ", outside, flags=re.IGNORECASE)
+    ).strip()
+    base = outside_clean or raw
+    alt = paren_parts[0] if paren_parts else base
     if any("etilen" in _tr_lower(p) and "glikol" in _tr_lower(p) for p in paren_parts):
-        terms.append("monoetilen glikol")
-    inferred = infer_product_groups(" ".join([raw] + terms))
-    is_non_med = any(g in NON_MEDICAL_GROUPS for g in inferred) and not any(g not in NON_MEDICAL_GROUPS for g in inferred)
-    queries = []
-    for t in list(dict.fromkeys(terms))[:3]:
-        queries.append(f"{t} {'satış iletişim' if is_non_med else 'medikal iletişim'}")
-        queries.append(f"{t} {'toptan tedarikçi' if is_non_med else 'tedarikçi satış'}")
-    return {"queries": list(dict.fromkeys(queries))[:4], "social_queries": [terms[0] if terms else raw]}
+        alt = "monoetilen glikol"
+
+    b2b_queries = [
+        f"{base} toptan satış tedarikçi iletişim",
+        f"{base} imalatçı üretici fabrika iletişim",
+        f"{alt} distribütör yetkili satıcı teklif",
+        f"{base} ihale yüklenicisi doğrudan temin firma",
+        f"site:firmasec.com {base} OR site:bulurum.com {base}",
+        f'{base} toptan ("info@" OR "@gmail.com")',
+    ]
+    tender_queries = [
+        f"site:ilan.gov.tr {base} ihale sonucu yüklenici",
+        f"site:ihalebul.com {base} yüklenici",
+    ]
+    directory_queries = [
+        f"site:firmasec.com {base}",
+        f"site:bulurum.com {base}",
+    ]
+    return {
+        "queries": list(dict.fromkeys(b2b_queries)),
+        "tender_queries": tender_queries,
+        "directory_queries": directory_queries,
+        "social_queries": [base],
+    }
 
 
 def load_ai_cache() -> dict[str, dict[str, Any]]:
@@ -500,22 +537,26 @@ def save_ai_cache(cache_data: dict[str, dict[str, Any]]) -> None:
 
 
 def analyze_item_with_gemini(item_name: str, api_key: str, ai_cache: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Önce ai_cache.json'a bakar; yoksa Gemini Flash ile tanım, eş anlamlılar, üst kategori ve marka çıkarır."""
+    """Önce ai_cache.json'a bakar; yoksa Gemini Flash ile tanım, sektör, eş anlamlılar ve 6 B2B sorgu üretir."""
     cache_key = re.sub(r"\s+", " ", item_name.strip().lower())
+    fallback_smart = build_smart_queries(item_name)
     if cache_key in ai_cache:
         cached = dict(ai_cache[cache_key])
-        cached["source"] = f"{cached.get('source', 'ai_cache')} (Önbellek)"
-        return cached
+        if len(cached.get("b2b_sorgular") or []) >= 6 or not api_key:
+            if not cached.get("b2b_sorgular"):
+                cached["b2b_sorgular"] = fallback_smart["queries"]
+            cached["source"] = f"{cached.get('source', 'ai_cache')} (Önbellek)"
+            return cached
 
-    fallback_smart = build_smart_queries(item_name)
     fallback_result = {
         "aciklama": (
             f"{item_name} kalemi hastane birimlerinin doğrudan temin ve piyasa fiyat araştırması kapsamında ihtiyaç duyduğu ürün/hizmettir. "
             "Türkiye'de yetkili medikal, teknik veya endüstriyel tedarikçilerden teklif toplanır."
         ),
-        "es_anlamlilar": fallback_smart["queries"][:3],
+        "es_anlamlilar": [item_name],
         "ust_kategori": ", ".join(infer_product_groups(item_name)) or "Kurumsal Tedarik",
         "markalar": [],
+        "b2b_sorgular": fallback_smart["queries"],
         "source": "Yerel Analiz",
     }
     if not api_key:
@@ -530,13 +571,20 @@ def analyze_item_with_gemini(item_name: str, api_key: str, ai_cache: dict[str, d
     prompt = (
         f"Kamu hastanesi satın alma birimi için şu kalemi analiz et: '{item_name}'.\n"
         "Yanıtı YALNIZCA aşağıdaki anahtarlara sahip geçerli bir JSON nesnesi olarak ver:\n"
-        "- aciklama: Tam olarak 2 cümle; ürünün/hizmetin ne işe yaradığını ve hangi hastane biriminde kullanıldığını açıkla.\n"
+        "- aciklama: Tam olarak 2 cümle; ürünün/hizmetin ne işe yaradığını ve hangi alanda kullanıldığını açıkla.\n"
         "- es_anlamlilar: Türkiye piyasasında bu kalem için kullanılan 3-5 adet eş anlamlı kelime/arama terimi listesi.\n"
-        "- ust_kategori: Bu ürünü satan ana tedarikçi türü (ör. 'tıbbi sarf', 'ecza deposu', 'medikal cihaz distribütörü', 'endüstriyel kimya', 'hastane mobilyası' vb.).\n"
+        "- ust_kategori: Bu ürünün ana sektörü / tedarikçi türü (ör. 'Medikal Cihaz Distribütörü', 'Tıbbi Sarf Malzeme', 'Endüstriyel Kimya', 'Hastane Mobilyası', 'Yapı & Hırdavat' vb.).\n"
         "- markalar: Türkiye'de bilinen 2-4 üretici veya ana marka adı listesi (yoksa boş liste).\n"
+        "- b2b_sorgular: Türkiye'deki tedarikçileri bulmak için TAM OLARAK 6 farklı B2B arama sorgusu listesi (sırasıyla: "
+        "1) toptan satış sorgusu, "
+        "2) imalatçı / üretici sorgusu, "
+        "3) Türkiye distribütörü / yetkili satıcı sorgusu, "
+        "4) ihale yüklenicisi / doğrudan temin sorgusu, "
+        "5) site:firmasec.com veya site:bulurum.com rehber tarama sorgusu, "
+        "6) doğrudan e-posta yakalayan operatörlü sorgu — örn. ürün adı + toptan + (\"info@\" OR \"@gmail.com\")).\n"
     )
-    client = genai.Client(api_key=api_key)
-    for model_name in ("gemini-3.5-flash", "gemini-2.5-flash"):
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=12000))
+    for model_name in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"):
         try:
             resp = client.models.generate_content(
                 model=model_name,
@@ -545,11 +593,19 @@ def analyze_item_with_gemini(item_name: str, api_key: str, ai_cache: dict[str, d
             )
             data = json.loads(resp.text or "{}")
             if data.get("aciklama"):
+                b2b = [str(x).strip() for x in (data.get("b2b_sorgular") or []) if str(x).strip()][:6]
+                if len(b2b) < 6:
+                    for fbq in fallback_smart["queries"]:
+                        if fbq not in b2b:
+                            b2b.append(fbq)
+                        if len(b2b) >= 6:
+                            break
                 result = {
                     "aciklama": str(data.get("aciklama", "")).strip(),
                     "es_anlamlilar": [str(x).strip() for x in (data.get("es_anlamlilar") or []) if str(x).strip()][:5],
                     "ust_kategori": str(data.get("ust_kategori", "")).strip(),
                     "markalar": [str(x).strip() for x in (data.get("markalar") or []) if str(x).strip()][:4],
+                    "b2b_sorgular": b2b,
                     "source": model_name,
                 }
                 ai_cache[cache_key] = result
@@ -561,7 +617,7 @@ def analyze_item_with_gemini(item_name: str, api_key: str, ai_cache: dict[str, d
 
 
 # ---------------------------------------------------------------------------
-# Tarayıcısız 3 Halkalı Arama & İletişim Kazıma Motoru (timeout=3, verify=False)
+# Tarayıcısız Çoklu Arama & İletişim / Rehber / İhale Kazıma Motoru (timeout=6s)
 # ---------------------------------------------------------------------------
 
 def _root_domain(url_or_domain: str) -> str:
@@ -574,20 +630,64 @@ def _root_domain(url_or_domain: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+def _domain_matches(domain: str, domain_set: set[str]) -> bool:
+    return any(domain == d or domain.endswith("." + d) for d in domain_set)
+
+
 def _is_excluded_domain(domain: str) -> bool:
-    return any(domain == m or domain.endswith("." + m) for m in MARKETPLACE_DOMAINS)
+    return _domain_matches(domain, MARKETPLACE_DOMAINS)
 
 
 def _is_social(domain: str) -> bool:
-    return any(domain == s or domain.endswith("." + s) for s in SOCIAL_DOMAINS)
+    return _domain_matches(domain, SOCIAL_DOMAINS)
+
+
+def _is_directory_domain(domain: str) -> bool:
+    return _domain_matches(domain, DIRECTORY_DOMAINS)
+
+
+def _is_tender_result_domain(domain: str) -> bool:
+    return _domain_matches(domain, TENDER_RESULT_DOMAINS)
 
 
 def _is_tender_domain(domain: str) -> bool:
     return any(domain == h or domain.endswith(h) or h in domain for h in TENDER_PORTAL_HINTS)
 
 
+def _normalize_phone(raw_phone: str) -> str:
+    cleaned = re.sub(r"\s+", " ", re.sub(r"[()]", "", raw_phone)).strip()
+    return cleaned
+
+
+def _dedupe_phones(phones: list[str]) -> list[str]:
+    seen_digits: set[str] = set()
+    out: list[str] = []
+    for p in phones:
+        norm = _normalize_phone(p)
+        digits = re.sub(r"\D", "", norm)
+        if digits.startswith("90") and len(digits) == 12:
+            digits = "0" + digits[2:]
+        if len(digits) >= 10 and digits not in seen_digits:
+            seen_digits.add(digits)
+            out.append(norm)
+    return out
+
+
+def _standardize_sector(raw_sector: str, groups: list[str] | None = None) -> str:
+    parts: list[str] = []
+    for piece in re.split(r"[,;|/]+", raw_sector or ""):
+        p = re.sub(r"\s+", " ", piece).strip()
+        if p and p.lower() not in {x.lower() for x in parts}:
+            parts.append(p)
+    for g in (groups or []):
+        gs = str(g).strip()
+        if gs and gs.lower() not in {x.lower() for x in parts}:
+            parts.append(gs)
+    return ", ".join(parts[:4])
+
+
 def rank_emails(emails: set[str], site_domain: str) -> tuple[str, list[str]]:
-    """KEP adreslerini eler ve teklif@/satis@/ihale@/kurumsal@/info@ sırasına göre sıralar."""
+    """KEP adreslerini eler, mükerrerleri temizler ve teklif@/satis@/ihale@/kurumsal@/info@ sırasına göre sıralar."""
     cleaned: list[str] = []
     for e in emails:
         el = e.lower().strip(".")
@@ -621,8 +721,8 @@ def _get_session() -> requests.Session:
     return sess
 
 
-def fetch_page(url: str, timeout: int = 3) -> tuple[int | None, str, str]:
-    """Tarayıcı açmadan timeout=3 ve verify=False ile sayfa getirir."""
+def fetch_page(url: str, timeout: int = DEFAULT_TIMEOUT) -> tuple[int | None, str, str]:
+    """Tarayıcı açmadan timeout=6 ve verify=False ile sayfa getirir."""
     try:
         resp = _get_session().get(url, timeout=timeout, verify=False, allow_redirects=True)
         resp.encoding = resp.apparent_encoding or "utf-8"
@@ -635,6 +735,8 @@ def _extract_contacts(html: str, base_url: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "html.parser")
     emails: set[str] = set()
     contact_links: list[str] = []
+    external_links: list[str] = []
+    base_dom = _root_domain(base_url)
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         hl = href.lower()
@@ -647,24 +749,41 @@ def _extract_contacts(html: str, base_url: str) -> dict[str, Any]:
             full = urljoin(base_url, href)
             if urlparse(full).scheme in ("http", "https"):
                 contact_links.append(full)
+        else:
+            full = urljoin(base_url, href)
+            if urlparse(full).scheme in ("http", "https"):
+                ldom = _root_domain(full)
+                if ldom and ldom != base_dom and not _is_excluded_domain(ldom) and not _is_social(ldom) and not _is_directory_domain(ldom):
+                    external_links.append(full)
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     text = soup.get_text(" ", strip=True)
     title = soup.title.string.strip() if soup.title and soup.title.string else ""
+    h1_el = soup.find("h1")
+    h1_text = h1_el.get_text(" ", strip=True) if h1_el else ""
     emails.update(m.lower() for m in EMAIL_RE.findall(text))
-    phones = list(dict.fromkeys(re.sub(r"\s+", " ", re.sub(r"[()]", "", p)).strip() for p in PHONE_RE.findall(text)))
+    phones = _dedupe_phones(PHONE_RE.findall(text))
     current_year = dt.date.today().year
     years = [int(y) for y in YEAR_RE.findall(text) if 2010 <= int(y) <= current_year + 1]
     is_maint = any(k in (title + " " + text[:4000]).lower() for k in MAINTENANCE_KEYWORDS)
     return {
-        "title": title, "emails": emails, "phones": phones, "max_year": max(years) if years else None,
-        "is_maintenance": is_maint, "contact_links": list(dict.fromkeys(contact_links))[:4],
+        "title": title, "h1": h1_text, "text": text, "emails": emails, "phones": phones,
+        "max_year": max(years) if years else None,
+        "is_maintenance": is_maint, "contact_links": list(dict.fromkeys(contact_links))[:6],
+        "external_links": list(dict.fromkeys(external_links))[:5],
         "groups": infer_product_groups(title + " " + text[:10000]),
     }
 
 
-def inspect_company_website(dom: str, company_hint: str = "", ignore_year_filter: bool = False, page_timeout: int = 3) -> dict[str, Any]:
-    """Siteyi ve /iletisim, /contact, /kurumsal sayfalarını tarayarak aktif mail/telefon çıkarır."""
+def inspect_company_website(
+    dom: str,
+    company_hint: str = "",
+    ignore_year_filter: bool = False,
+    page_timeout: int = DEFAULT_TIMEOUT,
+    extra_emails: set[str] | None = None,
+    extra_phones: list[str] | None = None,
+) -> dict[str, Any]:
+    """Ana sayfa ile /iletisim, /contact, /kurumsal sayfalarını (timeout=6s) tarayıp snippet verileriyle birleştirir."""
     status, final_url, html = fetch_page(f"https://{dom}", timeout=page_timeout)
     if status is None:
         status, final_url, html = fetch_page(f"http://{dom}", timeout=page_timeout)
@@ -680,29 +799,32 @@ def inspect_company_website(dom: str, company_hint: str = "", ignore_year_filter
     if home["is_maintenance"]:
         return {"status": "Pasif (Bakımda)"}
 
-    all_emails = set(home["emails"])
-    phones = list(home["phones"])
+    all_emails = set(home["emails"]) | set(extra_emails or ())
+    phones = _dedupe_phones(list(home["phones"]) + list(extra_phones or ()))
     years = [home["max_year"]] if home["max_year"] else []
     groups = set(home["groups"])
 
-    cand_links = list(home["contact_links"])
-    for fb in ("/iletisim", "/contact", "/kurumsal"):
+    cand_links: list[str] = []
+    for fb in ("/iletisim", "/contact", "/iletişim", "/kurumsal", "/bize-ulasin"):
         u = urljoin(final_url, fb)
         if u not in cand_links:
             cand_links.append(u)
+    for cl in home["contact_links"]:
+        if cl not in cand_links:
+            cand_links.append(cl)
 
-    home_prim, _ = rank_emails(all_emails, final_dom)
-    max_sub = 1 if (home_prim and phones) else 2
-    for link in cand_links[:max_sub]:
+    scanned_sub = 0
+    for link in cand_links:
+        if scanned_sub >= 3:
+            break
         if _root_domain(link) != final_dom:
             continue
+        scanned_sub += 1
         cs, cu, ch = fetch_page(link, timeout=page_timeout)
         if cs and cs < 400 and ch:
             cd = _extract_contacts(ch, cu)
             all_emails.update(cd["emails"])
-            for p in cd["phones"]:
-                if p not in phones:
-                    phones.append(p)
+            phones = _dedupe_phones(phones + cd["phones"])
             if cd["max_year"]:
                 years.append(cd["max_year"])
             groups.update(cd["groups"])
@@ -726,40 +848,113 @@ def inspect_company_website(dom: str, company_hint: str = "", ignore_year_filter
     }
 
 
-def _search_backend(query: str, backend: str | None, max_results: int) -> list[dict[str, str]]:
-    ddgs_cls = None
-    is_legacy = False
+def _unwrap_bing_url(raw_url: str) -> str:
+    if "bing.com/ck/a" not in raw_url:
+        return raw_url
     try:
-        from ddgs import DDGS
-        ddgs_cls = DDGS
-    except ImportError:
-        try:
-            from duckduckgo_search import DDGS
-            ddgs_cls = DDGS
-            is_legacy = True
-        except ImportError:
-            return []
+        import base64
+        u_vals = urlparse(raw_url).query
+        from urllib.parse import parse_qs
+        u = parse_qs(u_vals).get("u", [""])[0]
+        if len(u) > 2:
+            b64 = u[2:]
+            return base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4)).decode("utf-8", errors="ignore")
+    except Exception:
+        pass
+    return raw_url
+
+
+def _search_yandex(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT) -> list[dict[str, str]]:
     try:
-        client = ddgs_cls(timeout=3)
-        kwargs: dict[str, Any] = {"region": "tr-tr", "max_results": max_results}
-        if not is_legacy and backend:
-            kwargs["backend"] = backend
-        return [{"title": r.get("title", ""), "href": r.get("href", ""), "body": r.get("body", "")} for r in client.text(query, **kwargs)]
+        from ddgs.engines.yandex import Yandex
+        res = Yandex(timeout=timeout).search(query, region="tr-tr", safesearch="moderate", timelimit=None, page=1)
+        return [
+            {"title": getattr(r, "title", ""), "href": getattr(r, "href", ""), "body": getattr(r, "body", ""), "engine": "Yandex"}
+            for r in (res or [])[:max_results]
+        ]
     except Exception:
         return []
 
 
-def search_multi_engine(query: str, max_results: int = 12) -> list[dict[str, str]]:
+def _search_bing(query: str, max_results: int, timeout: int = DEFAULT_TIMEOUT) -> list[dict[str, str]]:
+    # Bing RSS ignores site: / complex boolean syntax and returns irrelevant global results; skip site: queries on Bing RSS.
+    if "site:" in query.lower():
+        return []
+    clean_q = re.sub(r'\([^)]*\)', " ", query).replace('"', " ")
+    clean_q = re.sub(r"\s+OR\s+", " ", clean_q, flags=re.IGNORECASE)
+    clean_q = re.sub(r"\s+", " ", clean_q).strip()
+    if not clean_q:
+        return []
+    try:
+        import xml.etree.ElementTree as ET
+        resp = _get_session().get(
+            "https://www.bing.com/search",
+            params={"q": clean_q, "format": "rss", "mkt": "tr-TR", "setlang": "tr", "count": str(max(max_results, 15))},
+            timeout=timeout,
+            verify=False,
+        )
+        if resp.status_code != 200 or "<rss" not in resp.text[:400]:
+            return []
+        root = ET.fromstring(resp.text)
+        out: list[dict[str, str]] = []
+        for it in root.findall("./channel/item")[:max_results]:
+            href = _unwrap_bing_url((it.findtext("link") or "").strip())
+            if href:
+                out.append({
+                    "title": (it.findtext("title") or "").strip(),
+                    "href": href,
+                    "body": (it.findtext("description") or "").strip(),
+                    "engine": "Bing",
+                })
+        return out
+    except Exception:
+        return []
+
+
+def _search_ddgs_backend(query: str, backend: str, max_results: int, timeout: int = DEFAULT_TIMEOUT) -> list[dict[str, str]]:
+    try:
+        from ddgs import DDGS
+        res = DDGS(timeout=timeout).text(query, region="tr-tr", max_results=max_results, backend=backend)
+        return [{"title": r.get("title", ""), "href": r.get("href", ""), "body": r.get("body", ""), "engine": backend.capitalize()} for r in (res or [])]
+    except Exception:
+        if backend == "duckduckgo":
+            try:
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    from duckduckgo_search import DDGS as LegacyDDGS
+                    res = LegacyDDGS(timeout=timeout).text(query, region="tr-tr", max_results=max_results)
+                return [{"title": r.get("title", ""), "href": r.get("href", ""), "body": r.get("body", ""), "engine": "DuckDuckGo"} for r in (res or [])]
+            except Exception:
+                return []
+        return []
+
+
+def search_multi_engine(query: str, max_results: int = 15, timeout: int = DEFAULT_TIMEOUT) -> list[dict[str, str]]:
+    """Yandex, Bing, Yahoo ve DuckDuckGo arama kaynaklarını paralel olarak sorgular ve birleştirir."""
     merged: list[dict[str, str]] = []
-    seen: set[str] = set()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        futs = [pool.submit(_search_backend, query, b, max_results) for b in ("google", "bing", "yahoo")]
+    seen: dict[str, dict[str, str]] = {}
+    tasks = [
+        (_search_yandex, (query, max_results, timeout)),
+        (_search_bing, (query, max_results, timeout)),
+        (_search_ddgs_backend, (query, "yahoo", max_results, timeout)),
+        (_search_ddgs_backend, (query, "duckduckgo", max_results, timeout)),
+    ]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        futs = [pool.submit(fn, *args) for fn, args in tasks]
         for fut in concurrent.futures.as_completed(futs):
             for r in fut.result():
                 href = (r.get("href") or "").strip()
-                if href and href not in seen:
-                    seen.add(href)
+                if not href:
+                    continue
+                if href not in seen:
+                    seen[href] = r
                     merged.append(r)
+                else:
+                    # Merge snippet text across engines so emails/phones in alternate snippets are preserved
+                    extra_body = (r.get("body") or "").strip()
+                    if extra_body and extra_body not in seen[href].get("body", ""):
+                        seen[href]["body"] = f"{seen[href].get('body', '')} {extra_body}".strip()
     return merged
 
 
@@ -779,15 +974,322 @@ def load_cache(cache_path: Path) -> dict[str, dict[str, Any]]:
             if prim.endswith(".kep.tr"):
                 prim = ""
             all_em = [x.strip().lower() for x in re.split(r"[,;]", str(r[4] or "")) if x.strip() and not x.strip().lower().endswith(".kep.tr")]
+            pgroups = str(r[10] or "") if len(r) > 10 else ""
+            sector = str(r[11] or "") if len(r) > 11 else ""
             cache[dom] = {
                 "company_name": str(r[0] or dom), "domain": dom, "website": str(r[2] or ""),
-                "primary_email": prim, "all_emails": all_em, "phone": str(r[5] or ""),
+                "primary_email": prim, "all_emails": all_em,
+                "phone": " / ".join(_dedupe_phones(re.split(r"[/,;]+", str(r[5] or "")))[:2]),
                 "status": str(r[6] or ""), "last_year": r[7] or "-", "last_checked": str(r[8] or ""),
-                "notes": str(r[9] or ""), "product_groups": str(r[10] or "") if len(r) > 10 else "",
+                "notes": str(r[9] or ""), "product_groups": pgroups,
+                "sector": sector or pgroups,
             }
     except Exception:
         pass
     return cache
+
+
+def _merge_firm_into_cache(cache: dict[str, dict[str, Any]], info: dict[str, Any], sector_tag: str, inferred: list[str]) -> None:
+    """Bulunan firmayı sektör etiketiyle ve mükerrer e-posta/telefonları temizleyerek havuza ekler/günceller."""
+    dom = (info.get("domain") or _root_domain(info.get("website", ""))).strip().lower()
+    if not dom:
+        return
+    existing = cache.get(dom, {})
+    merged_emails = set(existing.get("all_emails", [])) | set(info.get("all_emails", []))
+    if existing.get("primary_email"):
+        merged_emails.add(existing["primary_email"])
+    if info.get("primary_email"):
+        merged_emails.add(info["primary_email"])
+    prim, ordered = rank_emails(merged_emails, dom)
+
+    raw_phones = re.split(r"[/,;]+", f"{info.get('phone', '')} / {existing.get('phone', '')}")
+    phones = _dedupe_phones(raw_phones)
+
+    merged_sector = _standardize_sector(
+        f"{existing.get('sector', '')}, {info.get('sector', '')}, {sector_tag}",
+        inferred,
+    )
+    merged_groups = _standardize_sector(
+        f"{existing.get('product_groups', '')}, {info.get('product_groups', '')}",
+        inferred,
+    )
+    info["primary_email"] = prim or info.get("primary_email", "")
+    info["all_emails"] = ordered
+    info["phone"] = " / ".join(phones[:2])
+    info["sector"] = merged_sector
+    info["product_groups"] = merged_groups
+    cache[dom] = {
+        "company_name": info.get("company_name") or existing.get("company_name") or dom,
+        "domain": dom,
+        "website": info.get("website") or existing.get("website") or f"https://{dom}",
+        "primary_email": info["primary_email"],
+        "all_emails": ordered,
+        "phone": info["phone"],
+        "status": info.get("status") or existing.get("status") or "Aktif",
+        "last_year": info.get("last_year") or existing.get("last_year") or "-",
+        "last_checked": dt.date.today().isoformat(),
+        "notes": info.get("notes") or existing.get("notes") or "",
+        "product_groups": merged_groups,
+        "sector": merged_sector,
+    }
+
+
+def search_cache_pool(item_name: str, intel: dict[str, Any], cache: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sonraki aramalarda önce firma_havuzu.xlsx içindeki eşleşen sektör/kalem firmalarını getirir."""
+    ust_kat = intel.get("ust_kategori") or ""
+    inferred = infer_product_groups(f"{item_name} {ust_kat}")
+    stop = {"ve", "ile", "için", "icin", "grubu", "tipi", "adet", "satış", "satis", "toptan", "tedarik", "tedarikçi", "firma", "medikal", "ürün", "cihaz"}
+    raw_terms = [item_name, ust_kat] + list(intel.get("es_anlamlilar") or [])
+    tokens = {
+        re.sub(r"[^\wçğıöşü]", "", _tr_lower(w))
+        for t in raw_terms
+        for w in re.split(r"[\s,/()\-]+", str(t))
+    }
+    tokens = {t for t in tokens if len(t) >= 3 and t not in stop}
+
+    matched: list[tuple[int, dict[str, Any]]] = []
+    for dom, entry in cache.items():
+        if not str(entry.get("status", "")).startswith("Aktif"):
+            continue
+        if not entry.get("primary_email") and not entry.get("phone"):
+            continue
+        haystack = _tr_lower(" ".join([
+            entry.get("company_name", ""),
+            entry.get("sector", ""),
+            entry.get("product_groups", ""),
+            entry.get("notes", ""),
+        ]))
+        group_hits = sum(1 for g in inferred if _tr_lower(g) in haystack)
+        token_hits = sum(1 for tk in tokens if tk in haystack)
+        score = group_hits * 3 + token_hits
+        if score <= 0:
+            continue
+        hit = dict(entry)
+        hit.update({
+            "item": item_name,
+            "source": "Firma Havuzu (Önbellek)",
+            "match_type": "Havuz Eşleşmesi (Sektör)",
+        })
+        matched.append((score, hit))
+
+    matched.sort(key=lambda pair: (-pair[0], 0 if pair[1].get("primary_email") else 1, pair[1].get("company_name", "")))
+    return [h for _, h in matched]
+
+
+def _extract_directory_leads(
+    dir_items: list[dict[str, str]],
+    item_name: str,
+    sector_tag: str,
+    inferred: list[str],
+    timeout: int = DEFAULT_TIMEOUT,
+) -> tuple[list[tuple[str, str, str, set[str], list[str], str]], list[dict[str, Any]]]:
+    """firmasec.com ve bulurum.com rehber sonuçlarından firma sitesi, e-posta ve telefon çıkarır."""
+    web_candidates: list[tuple[str, str, str, set[str], list[str], str]] = []
+    direct_leads: list[dict[str, Any]] = []
+    if not dir_items:
+        return web_candidates, direct_leads
+
+    def parse_one(res: dict[str, str]) -> dict[str, Any]:
+        href = res.get("href", "")
+        title = res.get("title", "")
+        body = res.get("body", "")
+        snip_txt = f"{title} {body}"
+        emails = {m.lower() for m in EMAIL_RE.findall(snip_txt)}
+        phones = _dedupe_phones(PHONE_RE.findall(snip_txt))
+        comp_name = re.split(r"\s*[|/\-]\s*(?:firmasec|bulurum)", title, flags=re.IGNORECASE)[0].strip()
+        ext_doms: list[str] = []
+        if href:
+            st_code, f_url, html = fetch_page(href, timeout=timeout)
+            if st_code and st_code < 400 and html:
+                cd = _extract_contacts(html, f_url)
+                emails.update(cd["emails"])
+                phones = _dedupe_phones(phones + cd["phones"])
+                if cd["h1"] and len(cd["h1"]) > 2:
+                    comp_name = cd["h1"]
+                for ext_u in cd["external_links"]:
+                    ed = _root_domain(ext_u)
+                    if ed:
+                        ext_doms.append(ed)
+        return {
+            "href": href,
+            "comp_name": re.sub(r"\+90.*|0\d{3}.*", "", comp_name).strip()[:80] or "Rehber Firması",
+            "emails": emails,
+            "phones": phones,
+            "ext_doms": list(dict.fromkeys(ext_doms)),
+        }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        for parsed in pool.map(parse_one, dir_items[:15]):
+            if parsed["ext_doms"]:
+                web_candidates.append((
+                    parsed["ext_doms"][0], "Rehber Taraması (firmasec/bulurum)", "Rehber Eşleşmesi",
+                    parsed["emails"], parsed["phones"], parsed["comp_name"],
+                ))
+            else:
+                dom = _root_domain(parsed["href"])
+                prim, ordered = rank_emails(parsed["emails"], "")
+                if prim or parsed["phones"]:
+                    direct_leads.append({
+                        "item": item_name,
+                        "company_name": parsed["comp_name"],
+                        "domain": f"{dom}/{re.sub(r'[^a-z0-9]', '', _tr_lower(parsed['comp_name']))[:24]}" if dom else parsed["comp_name"],
+                        "website": parsed["href"],
+                        "primary_email": prim,
+                        "all_emails": ordered,
+                        "phone": " / ".join(parsed["phones"][:2]),
+                        "status": "Aktif (Rehber)",
+                        "last_year": "-",
+                        "notes": "Rehber sayfasından çıkarıldı",
+                        "source": "Rehber Taraması (firmasec/bulurum)",
+                        "match_type": "Rehber Eşleşmesi",
+                        "sector": sector_tag,
+                        "product_groups": ", ".join(inferred),
+                    })
+    return web_candidates, direct_leads
+
+
+def _extract_contractor_names_from_text(text: str) -> list[str]:
+    found: list[str] = []
+    for m in TENDER_CONTRACTOR_LABEL_RE.finditer(text):
+        cand = re.sub(r"\s+", " ", m.group(1)).strip(" .,-:;")
+        cand = re.split(r"\s+(?:Sözleşme|İhale|Bedel|Tarih|Tutarı|TL|TRY)\b", cand, flags=re.IGNORECASE)[0].strip(" .,-:;")
+        if len(cand) >= 5 and not PUBLIC_ENTITY_RE.search(_tr_upper(cand)):
+            found.append(cand[:110])
+    for m in COMPANY_NAME_RE.finditer(text):
+        cand = re.sub(r"\s+", " ", m.group(1)).strip(" .,-:;")
+        if len(cand) >= 6 and not PUBLIC_ENTITY_RE.search(_tr_upper(cand)) and not BOILERPLATE_LINE_RE.match(cand):
+            found.append(cand[:110])
+    unique: list[str] = []
+    seen: set[str] = set()
+    for c in found:
+        key = _tr_lower(c)
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+    return unique
+
+
+def _resolve_tender_contractors(
+    tender_items: list[dict[str, str]],
+    item_name: str,
+    sector_tag: str,
+    inferred: list[str],
+    cache: dict[str, dict[str, Any]],
+    progress_cb: Any = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> list[dict[str, Any]]:
+    """ilan.gov.tr ve ihalebul.com sonuçlarından yüklenici firmaları çıkarır ve iletişim bilgilerini bulur."""
+    if not tender_items:
+        return []
+    contractor_names: list[str] = []
+
+    def scan_tender_item(res: dict[str, str]) -> list[str]:
+        txt = f"{res.get('title', '')}\n{res.get('body', '')}"
+        href = res.get("href", "")
+        if href:
+            sc, _, html = fetch_page(href, timeout=timeout)
+            if sc and sc < 400 and len(html) > 500:
+                soup = BeautifulSoup(html, "html.parser")
+                for tag in soup(["script", "style", "noscript"]):
+                    tag.decompose()
+                page_txt = soup.get_text(" ", strip=True)
+                if len(page_txt) > 80:
+                    txt = f"{txt}\n{page_txt[:15000]}"
+        return _extract_contractor_names_from_text(txt)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        for names in pool.map(scan_tender_item, tender_items[:16]):
+            contractor_names.extend(names)
+
+    deduped: list[str] = []
+    seen_cores: set[str] = set()
+    for n in contractor_names:
+        cl = _classify_supplier(n)
+        if cl.get("is_public"):
+            continue
+        core_key = _tr_lower(cl["search_core"])
+        if core_key and core_key not in seen_cores:
+            seen_cores.add(core_key)
+            deduped.append(n)
+        if len(deduped) >= 12:
+            break
+
+    if not deduped:
+        return []
+    if progress_cb:
+        progress_cb(f"{item_name}: {len(deduped)} ihale yüklenicisinin iletişim bilgileri aranıyor...")
+
+    cache_by_name = {_tr_lower(v.get("company_name", "")): v for v in cache.values() if v.get("company_name")}
+    results: list[dict[str, Any]] = []
+
+    def resolve_contractor(comp_name: str) -> dict[str, Any] | None:
+        cl = _classify_supplier(comp_name)
+        core = cl["search_core"]
+        norm_core = _tr_lower(core)
+        for ck, cv in cache_by_name.items():
+            if norm_core and norm_core in ck and (cv.get("primary_email") or cv.get("phone")):
+                hit = dict(cv)
+                hit.update({
+                    "item": item_name,
+                    "source": "İhale Sonuç Taraması (Önbellek)",
+                    "match_type": "İhale Yüklenicisi (ilan.gov.tr / ihalebul.com)",
+                })
+                return hit
+
+        tokens = [t for t in re.split(r"\s+", norm_core) if len(t) >= 3]
+        matched_dom, fb_emails, fb_phones, fb_url = "", set(), [], ""
+        for q in (f'"{core}" iletişim teklif', f"{core} iletişim"):
+            for r in search_multi_engine(q, max_results=6, timeout=timeout):
+                dom = _root_domain(r.get("href", ""))
+                if not dom or _is_excluded_domain(dom) or _is_social(dom) or _is_tender_domain(dom) or _is_directory_domain(dom):
+                    continue
+                snip = _tr_lower(f"{r.get('title', '')} {r.get('body', '')}")
+                if tokens and tokens[0] not in snip and tokens[0] not in dom:
+                    continue
+                matched_dom, fb_url = dom, r.get("href", "")
+                raw_snip = f"{r.get('title', '')} {r.get('body', '')}"
+                fb_emails.update(m.lower() for m in EMAIL_RE.findall(raw_snip))
+                fb_phones.extend(_dedupe_phones(PHONE_RE.findall(raw_snip)))
+                break
+            if matched_dom:
+                break
+
+        if not matched_dom:
+            return None
+        info = inspect_company_website(
+            matched_dom, company_hint=comp_name, ignore_year_filter=True,
+            page_timeout=timeout, extra_emails=fb_emails, extra_phones=fb_phones,
+        )
+        if not info.get("status", "").startswith("Aktif"):
+            prim, ordered = rank_emails(fb_emails, matched_dom)
+            if prim or fb_phones:
+                info = {
+                    "company_name": comp_name[:80], "domain": matched_dom,
+                    "website": fb_url or f"https://{matched_dom}",
+                    "primary_email": prim, "all_emails": ordered,
+                    "phone": " / ".join(_dedupe_phones(fb_phones)[:2]),
+                    "status": "Aktif (İhale Özetinden)", "last_year": "-",
+                    "notes": "İhale yüklenicisi özetinden kurtarıldı",
+                }
+            else:
+                return None
+        if not info.get("primary_email") and not info.get("phone"):
+            return None
+        info.update({
+            "item": item_name,
+            "company_name": comp_name[:80],
+            "source": "İhale Sonuç Taraması",
+            "match_type": "İhale Yüklenicisi (ilan.gov.tr / ihalebul.com)",
+            "sector": sector_tag,
+            "product_groups": _standardize_sector(info.get("product_groups", ""), inferred),
+        })
+        return info
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        for res in pool.map(resolve_contractor, deduped):
+            if res:
+                results.append(res)
+    return results
 
 
 def run_three_ring_search(
@@ -795,54 +1297,101 @@ def run_three_ring_search(
     intel: dict[str, Any],
     cache: dict[str, dict[str, Any]],
     progress_cb: Any = None,
-    max_sites: int = 20,
+    max_sites: int = DEFAULT_MAX_SITES,
 ) -> list[dict[str, Any]]:
-    """3 halkalı aramayı (kalem+eş anlamlı + üst kategori + marka/EKAP) 15 iş parçacığı ve timeout=3 ile çalıştırır."""
-    smart = build_smart_queries(item_name)
-    ring1 = list(dict.fromkeys(smart["queries"] + [f"{s} satış iletişim" for s in (intel.get("es_anlamlilar") or [])[:2]]))[:4]
+    """Önce havuzdan eşleşen firmaları getirir; ardından çoklu arama motoru (Yandex/Bing/Yahoo/DDG), 6 B2B sorgu, rehber ve ihale sonuçlarını tarar."""
     ust_kat = intel.get("ust_kategori") or ""
     inferred = infer_product_groups(f"{item_name} {ust_kat}")
+    sector_tag = _standardize_sector(ust_kat, inferred) or "Kurumsal Tedarik"
+
+    # 1. Önce firma_havuzu.xlsx içindeki eşleşen firmaları getir
+    pool_hits = search_cache_pool(item_name, intel, cache)
+    results: list[dict[str, Any]] = list(pool_hits)
+    seen_domains: set[str] = {str(r.get("domain", "")).lower() for r in pool_hits if r.get("domain")}
+
+    smart = build_smart_queries(item_name)
+    gemini_b2b = [q for q in (intel.get("b2b_sorgular") or []) if q]
+    ring1 = list(dict.fromkeys(gemini_b2b + smart["queries"]))[:6]
     ring2 = [f"{ust_kat} türkiye tedarikçi iletişim"] if ust_kat else []
     for g in inferred[:2]:
         ring2.extend(PRODUCT_GROUPS[g]["queries"][:1])
     ring3 = [f"{m} türkiye distribütör iletişim" for m in (intel.get("markalar") or [])[:2]]
-    ring3.append(f"{item_name} doğrudan temin")
+    ring_tender = smart["tender_queries"]
+    ring_dir = smart["directory_queries"]
 
     query_specs: list[tuple[str, str, str, int]] = (
-        [(q, "Web Arama", "1. Halka (Doğrudan)", 12) for q in ring1]
-        + [(q, "Web Arama (Kategori)", "2. Halka (Üst Kategori)", 10) for q in list(dict.fromkeys(ring2))[:3]]
-        + [(q, "Marka / İhale İzi", "3. Halka (Marka / EKAP)", 8) for q in ring3]
+        [(q, "Web Arama (B2B)", "1. Halka (6 B2B Sorgu)", 15) for q in ring1]
+        + [(q, "Web Arama (Kategori)", "2. Halka (Üst Kategori)", 12) for q in list(dict.fromkeys(ring2))[:3]]
+        + [(q, "Marka Taraması", "3. Halka (Marka)", 10) for q in ring3]
+        + [(q, "Rehber Taraması", "Rehber (firmasec/bulurum)", 12) for q in ring_dir]
+        + [(q, "İhale Sonuç Taraması", "İhale (ilan.gov.tr/ihalebul)", 10) for q in ring_tender]
     )
 
     if progress_cb:
-        progress_cb(f"{item_name}: {len(query_specs)} sorgu taranıyor...")
+        progress_cb(f"{item_name}: Havuzdan {len(pool_hits)} firma geldi · {len(query_specs)} sorgu 4 motorda taranıyor...")
 
     candidate_domains: dict[str, tuple[str, str]] = {}
     snippet_fallbacks: dict[str, dict[str, Any]] = {}
+    directory_hits: list[dict[str, str]] = []
+    tender_hits: list[dict[str, str]] = []
+    seen_special_urls: set[str] = set()
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as qpool:
-        q_futs = {qpool.submit(search_multi_engine, q, mr): (sl, mt) for q, sl, mt, mr in query_specs}
+        q_futs = {qpool.submit(search_multi_engine, q, mr, DEFAULT_TIMEOUT): (sl, mt) for q, sl, mt, mr in query_specs}
         for qfut in concurrent.futures.as_completed(q_futs):
             sl, mt = q_futs[qfut]
             for res in qfut.result():
                 href = res.get("href", "")
                 dom = _root_domain(href)
-                if not dom or _is_excluded_domain(dom) or _is_social(dom) or _is_tender_domain(dom):
+                if not dom or _is_excluded_domain(dom) or _is_social(dom):
                     continue
+                if _is_tender_result_domain(dom):
+                    if href and href not in seen_special_urls:
+                        seen_special_urls.add(href)
+                        tender_hits.append(res)
+                    continue
+                if _is_tender_domain(dom):
+                    continue
+                if _is_directory_domain(dom):
+                    if href and href not in seen_special_urls:
+                        seen_special_urls.add(href)
+                        directory_hits.append(res)
+                    continue
+
                 candidate_domains.setdefault(dom, (sl, mt))
                 txt = f"{res.get('title', '')} {res.get('body', '')}"
-                s_em = set(EMAIL_RE.findall(txt))
-                s_ph = [re.sub(r"\s+", " ", re.sub(r"[()]", "", p)).strip() for p in PHONE_RE.findall(txt)]
-                if s_em or s_ph:
-                    fb = snippet_fallbacks.setdefault(dom, {"emails": set(), "phones": [], "title": res.get("title", ""), "url": href})
-                    fb["emails"].update(s_em)
-                    fb["phones"].extend(s_ph)
+                s_em = {m.lower() for m in EMAIL_RE.findall(txt)}
+                s_ph = _dedupe_phones(PHONE_RE.findall(txt))
+                fb = snippet_fallbacks.setdefault(dom, {"emails": set(), "phones": [], "title": res.get("title", ""), "url": href})
+                fb["emails"].update(s_em)
+                fb["phones"] = _dedupe_phones(fb["phones"] + s_ph)
 
-    results: list[dict[str, Any]] = []
+    # Rehber (firmasec / bulurum) leadlerini çıkar
+    dir_web_cands, dir_direct_leads = _extract_directory_leads(directory_hits, item_name, sector_tag, inferred, timeout=DEFAULT_TIMEOUT)
+    for edom, d_sl, d_mt, d_em, d_ph, d_hint in dir_web_cands:
+        candidate_domains.setdefault(edom, (d_sl, d_mt))
+        fb = snippet_fallbacks.setdefault(edom, {"emails": set(), "phones": [], "title": d_hint, "url": f"https://{edom}"})
+        fb["emails"].update(d_em)
+        fb["phones"] = _dedupe_phones(fb["phones"] + d_ph)
+        fb["company_hint"] = d_hint
+
+    for lead in dir_direct_leads:
+        ldom = lead["domain"]
+        if ldom not in seen_domains:
+            seen_domains.add(ldom)
+            _merge_firm_into_cache(cache, lead, sector_tag, inferred)
+            results.append(lead)
+
+    # Aday web sitelerini (max 120) havuz kontrolü ve kazıma ile işle
     to_fetch: list[tuple[str, str, str]] = []
     for dom, (sl, mt) in candidate_domains.items():
-        if dom in cache and cache[dom].get("status") == "Aktif" and cache[dom].get("primary_email"):
+        if dom in seen_domains:
+            continue
+        if dom in cache and str(cache[dom].get("status", "")).startswith("Aktif") and (cache[dom].get("primary_email") or cache[dom].get("phone")):
             hit = dict(cache[dom])
+            _merge_firm_into_cache(cache, hit, sector_tag, inferred)
             hit.update({"item": item_name, "source": f"{sl} (Önbellek)", "match_type": mt})
+            seen_domains.add(dom)
             results.append(hit)
         else:
             to_fetch.append((dom, sl, mt))
@@ -850,8 +1399,21 @@ def run_three_ring_search(
     to_fetch = to_fetch[:max_sites]
     if to_fetch:
         total = len(to_fetch)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as pool:
-            futs = {pool.submit(inspect_company_website, dom, "", False, 3): (dom, sl, mt) for dom, sl, mt in to_fetch}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
+            futs = {}
+            for dom, sl, mt in to_fetch:
+                fb = snippet_fallbacks.get(dom, {})
+                futs[
+                    pool.submit(
+                        inspect_company_website,
+                        dom,
+                        fb.get("company_hint", ""),
+                        False,
+                        DEFAULT_TIMEOUT,
+                        fb.get("emails"),
+                        fb.get("phones"),
+                    )
+                ] = (dom, sl, mt)
             done = 0
             for fut in concurrent.futures.as_completed(futs):
                 done += 1
@@ -861,14 +1423,14 @@ def run_three_ring_search(
                 info = fut.result()
                 fb = snippet_fallbacks.get(dom)
                 if not info.get("status", "").startswith("Aktif"):
-                    if fb and fb["emails"]:
+                    if fb and (fb["emails"] or fb["phones"]):
                         prim, ordered = rank_emails(fb["emails"], dom)
-                        if prim:
+                        if prim or fb["phones"]:
                             info = {
-                                "company_name": (fb["title"].split("|")[0].split("-")[0].strip() or dom)[:80],
+                                "company_name": (fb.get("company_hint") or fb["title"].split("|")[0].split("-")[0].strip() or dom)[:80],
                                 "domain": dom, "website": fb["url"] or f"https://{dom}",
                                 "primary_email": prim, "all_emails": ordered,
-                                "phone": " / ".join(dict.fromkeys(fb["phones"][:2])),
+                                "phone": " / ".join(_dedupe_phones(fb["phones"])[:2]),
                                 "status": "Aktif (Arama Özetinden)", "last_year": "-",
                                 "notes": "Arama özetinden kurtarıldı", "product_groups": ", ".join(inferred),
                             }
@@ -876,16 +1438,27 @@ def run_three_ring_search(
                             continue
                     else:
                         continue
-                elif not info.get("primary_email") and fb and fb["emails"]:
-                    prim, ordered = rank_emails(fb["emails"], dom)
-                    if prim:
-                        info["primary_email"], info["all_emails"] = prim, ordered
                 if not info.get("primary_email") and not info.get("phone"):
                     continue
-                info.update({"item": item_name, "source": sl, "match_type": mt, "last_checked": dt.date.today().isoformat()})
-                if info.get("status") == "Aktif":
-                    cache[dom] = info
+                info.update({
+                    "item": item_name, "source": sl, "match_type": mt,
+                    "sector": sector_tag, "last_checked": dt.date.today().isoformat(),
+                })
+                seen_domains.add(dom)
+                _merge_firm_into_cache(cache, info, sector_tag, inferred)
                 results.append(info)
+
+    # İhale ve doğrudan temin sonuçlarından (ilan.gov.tr / ihalebul.com) yüklenici firmaları çıkar ve çöz
+    tender_contractors = _resolve_tender_contractors(
+        tender_hits, item_name, sector_tag, inferred, cache, progress_cb=progress_cb, timeout=DEFAULT_TIMEOUT
+    )
+    for tc in tender_contractors:
+        tdom = str(tc.get("domain", "")).lower()
+        if tdom and tdom not in seen_domains:
+            seen_domains.add(tdom)
+            _merge_firm_into_cache(cache, tc, sector_tag, inferred)
+            results.append(tc)
+
     return results
 
 
@@ -934,7 +1507,7 @@ def resolve_mkys_companies(
                 break
         if not matched_dom:
             return None
-        info = inspect_company_website(matched_dom, company_hint=full_name, ignore_year_filter=True, page_timeout=3)
+        info = inspect_company_website(matched_dom, company_hint=full_name, ignore_year_filter=True, page_timeout=DEFAULT_TIMEOUT, extra_emails=fb_emails, extra_phones=fb_phones)
         if not info.get("status", "").startswith("Aktif"):
             return None
         if not info.get("primary_email") and fb_emails:
@@ -982,7 +1555,8 @@ def save_cache(cache_path: Path, cache: dict[str, dict[str, Any]]) -> None:
                 c["company_name"], c["domain"], c["website"], c["primary_email"],
                 "; ".join(e for e in c.get("all_emails", []) if not e.lower().endswith(".kep.tr")),
                 c["phone"], c["status"], c.get("last_year", "-"),
-                c.get("last_checked", dt.date.today().isoformat()), c.get("notes", ""), c.get("product_groups", ""),
+                c.get("last_checked", dt.date.today().isoformat()), c.get("notes", ""),
+                c.get("product_groups", ""), c.get("sector", c.get("product_groups", "")),
             ]
             for c in sorted(cache.values(), key=lambda x: x["domain"])
         ]
@@ -1011,6 +1585,7 @@ def rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         {
             "Kalem": r.get("item", ""),
             "Firma Adı": r.get("company_name", ""),
+            "Sektör": r.get("sector") or r.get("product_groups", ""),
             "Eşleşme Tipi": r.get("match_type", ""),
             "Öncelikli E-posta": r.get("primary_email", ""),
             "Tüm E-postalar": "; ".join(e for e in r.get("all_emails", []) if not str(e).lower().endswith(".kep.tr")),
@@ -1035,7 +1610,8 @@ def build_excel_bytes(rows: list[dict[str, Any]]) -> bytes:
     ws_main.title = "Tedarikçiler"
     out_rows = [
         [
-            r.get("item", ""), r.get("company_name", ""), r.get("match_type", ""), r.get("source", ""),
+            r.get("item", ""), r.get("company_name", ""), r.get("sector") or r.get("product_groups", ""),
+            r.get("match_type", ""), r.get("source", ""),
             r.get("product_groups", ""), r.get("website", ""), r.get("primary_email", ""),
             "; ".join(e for e in r.get("all_emails", []) if not str(e).lower().endswith(".kep.tr")),
             r.get("phone", ""), r.get("status", ""), r.get("last_year", "-"), r.get("notes", ""),
@@ -1090,9 +1666,9 @@ def main() -> None:
         <div class="erp-topbar">
             <div>
                 <h1>🏥 Kamu Satın Alma | Akıllı Tedarikçi & Teklif Havuzu</h1>
-                <p>4734/22-d Piyasa Fiyat Araştırması · Gemini Flash + 3 Halkalı Hızlı Tedarikçi Motoru</p>
+                <p>4734/22-d Piyasa Fiyat Araştırması · Yandex/Bing/Yahoo/DDG Çoklu Motor + İhale/Rehber + Gemini B2B</p>
             </div>
-            <div class="erp-badge">⚡ Hızlı Mod · max 20 site / timeout 3s</div>
+            <div class="erp-badge">⚡ Güçlü Mod · max 120 site / timeout 6s</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1162,9 +1738,10 @@ def main() -> None:
                 intel = analyze_item_with_gemini(item, gemini_key if use_gemini else "", ai_cache)
                 intel_map[item] = intel
                 item_rows = run_three_ring_search(
-                    item, intel, cache, progress_cb=lambda m, i=idx: status_slot.info(f"⏳ [{i}/{total}] {m}"), max_sites=20
+                    item, intel, cache, progress_cb=lambda m, i=idx: status_slot.info(f"⏳ [{i}/{total}] {m}"), max_sites=DEFAULT_MAX_SITES
                 )
                 all_rows.extend(item_rows)
+                save_cache(CACHE_XLSX, cache)
                 progress_bar.progress(int((idx / total) * 100))
 
         all_rows.sort(key=lambda r: (r.get("item", ""), 0 if r.get("primary_email") else 1, r.get("company_name", "")))
@@ -1201,11 +1778,13 @@ def main() -> None:
             for item_name, intel in intel_map.items():
                 syns = "".join(f'<span class="pill">{s}</span>' for s in intel.get("es_anlamlilar", []))
                 brands = "".join(f'<span class="pill">🏷️ {b}</span>' for b in intel.get("markalar", []))
+                queries_html = "".join(f'<span class="pill">🔍 {q}</span>' for q in intel.get("b2b_sorgular", []))
                 st.markdown(
                     f'<div class="erp-card"><strong>{item_name}</strong> '
                     f'<span style="color:#0F766E; font-size:0.82rem;">({intel.get("ust_kategori", "")} · {intel.get("source", "")})</span>'
                     f'<p style="margin:6px 0; color:#334155; font-size:0.9rem;">{intel.get("aciklama", "")}</p>'
-                    f'<div>{syns} {brands}</div></div>',
+                    f'<div>{syns} {brands}</div>'
+                    f'<div style="margin-top:6px;">{queries_html}</div></div>',
                     unsafe_allow_html=True,
                 )
 
