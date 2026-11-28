@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import html as html_lib
 import importlib
+import inspect
 import json
 import sys
 import threading
@@ -20,6 +21,20 @@ _APP_DIR = str(Path(__file__).resolve().parent)
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
 
+def _sync_local_modules() -> None:
+    """Streamlit hot-reload sırasında alt modüllerin eski önbellekte kalmasını önler."""
+    for mod_name in ("db", "ai_parser", "doc_generator", "search_engine"):
+        mod = importlib.import_module(mod_name)
+        mod_file = getattr(mod, "__file__", None)
+        if mod_file:
+            mtime = Path(mod_file).stat().st_mtime
+            prev_mtime = getattr(mod, "_loaded_mtime", None)
+            if prev_mtime is not None and mtime > prev_mtime:
+                mod = importlib.reload(mod)
+            mod._loaded_mtime = mtime
+
+_sync_local_modules()
+
 import ai_parser as _ai_parser_mod
 import db as _db_mod
 import doc_generator as _doc_gen_mod
@@ -31,7 +46,7 @@ if not hasattr(_db_mod, "increment_supplier_trust"):
     _db_mod = importlib.reload(_db_mod)
 if not hasattr(_doc_gen_mod, "build_market_research_docx"):
     _doc_gen_mod = importlib.reload(_doc_gen_mod)
-if not hasattr(_search_mod, "run_three_ring_search"):
+if "stats_out" not in inspect.signature(_search_mod.run_three_ring_search).parameters:
     _search_mod = importlib.reload(_search_mod)
 
 from ai_parser import (
@@ -733,18 +748,30 @@ def render_step2(
                 if it_obj.get("id"):
                     save_item_intel(int(it_obj["id"]), intel)
 
+            sig_params = inspect.signature(run_three_ring_search).parameters
+            if "stats_out" not in sig_params:
+                _reloaded = importlib.reload(_search_mod)
+                run_fn = _reloaded.run_three_ring_search
+                sig_params = inspect.signature(run_fn).parameters
+            else:
+                run_fn = run_three_ring_search
+
             for r_num in range(start_round, end_round + 1):
-                rows = run_three_ring_search(
-                    it_name,
-                    intel,
-                    cache,
-                    progress_cb=lambda m, i=idx: status_slot.info(f"⏳ [{i}/{len(selected_item_names)}] {m}"),
-                    max_sites=DEFAULT_MAX_SITES,
-                    round_num=r_num,
-                    skip_domains=visited_domains,
-                    api_key=gemini_key,
-                    stats_out=search_stats,
-                )
+                call_kwargs: dict[str, Any] = {
+                    "progress_cb": lambda m, i=idx: status_slot.info(f"⏳ [{i}/{len(selected_item_names)}] {m}"),
+                    "max_sites": DEFAULT_MAX_SITES,
+                    "round_num": r_num,
+                    "skip_domains": visited_domains,
+                }
+                if "api_key" in sig_params:
+                    call_kwargs["api_key"] = gemini_key
+                if "stats_out" in sig_params:
+                    call_kwargs["stats_out"] = search_stats
+                else:
+                    search_stats.setdefault("errors", []).append(
+                        "Sunucudaki search_engine.py dosyası eski sürümde. Lütfen search_engine.py dosyasını GitHub'da güncelleyip Reboot app yapın."
+                    )
+                rows = run_fn(it_name, intel, cache, **call_kwargs)
                 found_total.extend(rows)
                 save_cache(CACHE_XLSX, cache)
                 step_done += 1
