@@ -4,13 +4,34 @@ from __future__ import annotations
 
 import datetime as dt
 import html as html_lib
+import importlib
 import json
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+
+_APP_DIR = str(Path(__file__).resolve().parent)
+if _APP_DIR not in sys.path:
+    sys.path.insert(0, _APP_DIR)
+
+import ai_parser as _ai_parser_mod
+import db as _db_mod
+import doc_generator as _doc_gen_mod
+import search_engine as _search_mod
+
+if not hasattr(_ai_parser_mod, "parse_mkys_excel"):
+    _ai_parser_mod = importlib.reload(_ai_parser_mod)
+if not hasattr(_db_mod, "get_mkys_stats"):
+    _db_mod = importlib.reload(_db_mod)
+if not hasattr(_doc_gen_mod, "build_market_research_docx"):
+    _doc_gen_mod = importlib.reload(_doc_gen_mod)
+if not hasattr(_search_mod, "run_three_ring_search"):
+    _search_mod = importlib.reload(_search_mod)
 
 from ai_parser import parse_demand_form, parse_mkys_excel, parse_offer_document, parse_tr_number
 from db import (
