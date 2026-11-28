@@ -157,16 +157,18 @@ def _build_gemini_parts(filename: str, raw_bytes: bytes, prompt_text: str) -> li
     return [f"BELGE İÇERİĞİ ({filename}):\n{extracted[:25000]}\n\n{prompt_text}"]
 
 
-def _call_gemini_json(api_key: str, parts: list[Any]) -> dict[str, Any] | None:
+def _call_gemini_json_strict(api_key: str, parts: list[Any], timeout_ms: int = 30000) -> tuple[dict[str, Any] | None, str]:
+    """Fail-Closed JSON çağrısı: başarılıysa (data, ''), hata durumunda (None, gerçek_hata_mesajı) döner."""
     if not api_key:
-        return None
+        return None, "GEMINI_API_KEY tanımlı değil."
     try:
         from google import genai
         from google.genai import types
-    except ImportError:
-        return None
+    except ImportError as exc:
+        return None, f"google-genai paketi yüklenemedi: {exc}"
 
-    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=30000))
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout_ms))
+    last_err = "Bilinmeyen Gemini API hatası."
     for model_name in GEMINI_DOC_MODELS:
         try:
             resp = client.models.generate_content(
@@ -175,15 +177,25 @@ def _call_gemini_json(api_key: str, parts: list[Any]) -> dict[str, Any] | None:
                 config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1),
             )
             txt = (resp.text or "").strip()
+            if not txt:
+                last_err = f"{model_name}: Boş yanıt döndü."
+                continue
             if txt.startswith("```"):
                 txt = re.sub(r"^```(?:json)?\s*|\s*```$", "", txt, flags=re.DOTALL).strip()
             data = json.loads(txt)
             if isinstance(data, dict):
                 data["_model"] = model_name
-                return data
-        except Exception:
+                return data, ""
+            last_err = f"{model_name}: JSON nesnesi yerine beklenmeyen tip döndü."
+        except Exception as exc:
+            last_err = f"{model_name}: {exc}"
             continue
-    return None
+    return None, last_err
+
+
+def _call_gemini_json(api_key: str, parts: list[Any]) -> dict[str, Any] | None:
+    data, _ = _call_gemini_json_strict(api_key, parts)
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -618,3 +630,191 @@ def parse_mkys_excel(
         "total_rows": max(0, len(non_empty) - best_idx - 1),
         "needs_mapping": False,
     }
+
+
+# ---------------------------------------------------------------------------
+# Fail-Closed Kayıt Öncesi Yapay Zeka Tampon Bölgesi & Otomatik Havuz Denetimi
+# ---------------------------------------------------------------------------
+
+def verify_suppliers_with_ai(
+    candidates: list[dict[str, Any]],
+    item_name: str,
+    api_key: str,
+    batch_size: int = 20,
+) -> dict[str, Any]:
+    """20'şerli paketler halinde aday tedarikçileri web içerikleriyle Gemini'de denetler.
+    FAIL-CLOSED: Herhangi bir API/kota/zaman aşımı/JSON hatasında asla onaysız aday döndürmez (verified=[] + error).
+    """
+    if not candidates:
+        return {"verified": [], "rejected_count": 0, "error": ""}
+    if not api_key:
+        return {
+            "verified": [],
+            "rejected_count": 0,
+            "error": "GEMINI_API_KEY tanımlı değil. Fail-Closed güvenlik kuralı gereği onaysız adaylar kaydedilmedi.",
+        }
+
+    verified_all: list[dict[str, Any]] = []
+    rejected_total = 0
+
+    for start in range(0, len(candidates), batch_size):
+        batch = candidates[start : start + batch_size]
+        payload = [
+            {
+                "idx": idx,
+                "domain": str(c.get("domain") or "").strip().lower(),
+                "company_name": str(c.get("company_name") or "").strip(),
+                "website": str(c.get("website") or "").strip(),
+                "title": str(c.get("site_title") or "").strip()[:160],
+                "meta": str(c.get("site_meta") or "").strip()[:220],
+                "content_excerpt": str(c.get("site_excerpt") or c.get("notes") or "").strip()[:700],
+            }
+            for idx, c in enumerate(batch)
+        ]
+
+        prompt = (
+            f"Kamu kurumu/hastanesi satın alma birimi için '{item_name}' kalemini tedarik edebilecek gerçek firmaları denetle.\n"
+            "Aşağıdaki aday listesinin her biri için kendi web sitesi içeriğini (title, meta, content_excerpt) inceleyerek karar ver.\n"
+            f"ADAYLAR:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "Yanıtı YALNIZCA aşağıdaki şemada geçerli JSON olarak ver:\n"
+            "{\n"
+            '  "results": [\n'
+            "    {\n"
+            '      "idx": 0,\n'
+            '      "domain": "ornek.com.tr",\n'
+            '      "is_valid_supplier": true,\n'
+            '      "real_sector": "Firmanın kendi içeriğine göre gerçek ticari faaliyet alanı (ör. Yapı Market, Ecza Deposu, Tıbbi Sarf, Sıhhi Tesisat)",\n'
+            '      "clean_name": "Ana Sayfa veya ürün listesi çöpleri temizlenmiş resmi şirket ünvanı"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "KESİN KURALLAR:\n"
+            f"- is_valid_supplier: Bu firma aranan '{item_name}' kalemini resmi/faturalı olarak tedarik edebilecek gerçek bir satıcı, toptancı, üretici, distribütör veya ecza deposu ise true; DEĞİLSE false.\n"
+            "- Haber siteleri, telekom operatörleri, bahis/kumar/kredi siteleri, prospektüs/sağlık-bilgi/blog/sözlük siteleri, ilan portalları ve farklı sektör firmaları için KESİNLİKLE is_valid_supplier: false ver.\n"
+            "- clean_name içinde asla 'Ana Sayfa', 'İletişim', 'Ürünlerimiz', fiyat veya uzun ürün listesi olmasın.\n"
+        )
+        data, err = _call_gemini_json_strict(api_key, [prompt], timeout_ms=35000)
+        if err or not data or not isinstance(data.get("results"), list):
+            return {
+                "verified": [],
+                "rejected_count": 0,
+                "error": f"Gemini AI doğrulama hatası (Fail-Closed): {err or 'Geçersiz JSON sonuç listesi'}",
+            }
+
+        decisions_by_idx: dict[int, dict[str, Any]] = {}
+        decisions_by_dom: dict[str, dict[str, Any]] = {}
+        for item in data["results"]:
+            if not isinstance(item, dict):
+                continue
+            if "idx" in item:
+                try:
+                    decisions_by_idx[int(item["idx"])] = item
+                except (TypeError, ValueError):
+                    pass
+            dom_k = str(item.get("domain") or "").strip().lower()
+            if dom_k:
+                decisions_by_dom[dom_k] = item
+
+        for idx, cand in enumerate(batch):
+            dom_k = str(cand.get("domain") or "").strip().lower()
+            dec = decisions_by_idx.get(idx) or decisions_by_dom.get(dom_k)
+            if not dec or dec.get("is_valid_supplier") is not True:
+                rejected_total += 1
+                continue
+
+            clean_nm = str(dec.get("clean_name") or "").strip()
+            real_sec = str(dec.get("real_sector") or "").strip()
+            verified_cand = dict(cand)
+            if clean_nm and len(clean_nm) >= 2:
+                verified_cand["company_name"] = clean_nm[:80]
+            if real_sec:
+                verified_cand["sector"] = real_sec[:120]
+            verified_cand["ai_verified"] = 1
+            verified_all.append(verified_cand)
+
+    return {
+        "verified": verified_all,
+        "rejected_count": rejected_total,
+        "error": "",
+    }
+
+
+def sanitize_pool_batch_with_ai(
+    pool_rows: list[dict[str, Any]],
+    mkys_rows: list[dict[str, Any]],
+    api_key: str,
+    batch_size: int = 20,
+) -> dict[str, Any]:
+    """ai_verified = 0 olan mevcut havuz ve MKYS kayıtlarını sessizce Gemini ile denetler."""
+    if not api_key:
+        return {"pool_decisions": [], "mkys_decisions": [], "error": "GEMINI_API_KEY tanımlı değil."}
+
+    pool_decisions: list[dict[str, Any]] = []
+    mkys_decisions: list[dict[str, Any]] = []
+
+    for start in range(0, len(pool_rows), batch_size):
+        batch = pool_rows[start : start + batch_size]
+        payload = [
+            {
+                "id": int(r["id"]),
+                "company_name": str(r.get("company_name") or ""),
+                "domain": str(r.get("domain") or ""),
+                "website": str(r.get("website") or ""),
+                "current_sector": str(r.get("sektor") or ""),
+                "items_sold": str(r.get("items_sold_json") or "[]")[:300],
+            }
+            for r in batch
+        ]
+        prompt = (
+            "Satın alma veritabanındaki mevcut kayıtları temizle. Her kayıt için gerçek bir ticari tedarikçi olup olmadığını belirle.\n"
+            f"KAYITLAR:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "Yanıtı YALNIZCA şu JSON şemasında ver:\n"
+            '{"decisions": [{"id": 1, "keep": true, "real_sector": "Gerçek Faaliyet Alanı", "clean_name": "Temiz Şirket Ünvanı"}]}\n'
+            "Kurallar:\n"
+            "- Haber, medya, telekom, bahis, kredi, prospektüs/ilaç-bilgi siteleri, blog/sözlük, sosyal medya, pazaryeri veya spam kayıtlar için keep: false ver.\n"
+            "- Gerçek satıcı, toptancı, üretici, distribütör, yapı market, ecza deposu veya servis firmaları için keep: true ver ve real_sector alanını sitenin/ünvanın gerçek faaliyet alanıyla doldur.\n"
+        )
+        data, err = _call_gemini_json_strict(api_key, [prompt], timeout_ms=30000)
+        if err or not data or not isinstance(data.get("decisions"), list):
+            return {"pool_decisions": pool_decisions, "mkys_decisions": mkys_decisions, "error": err or "Geçersiz JSON"}
+        for d in data["decisions"]:
+            if isinstance(d, dict) and "id" in d:
+                pool_decisions.append({
+                    "id": int(d["id"]),
+                    "keep": d.get("keep") is True,
+                    "real_sector": str(d.get("real_sector") or "").strip(),
+                    "clean_name": str(d.get("clean_name") or "").strip(),
+                })
+
+    for start in range(0, len(mkys_rows), batch_size):
+        batch = mkys_rows[start : start + batch_size]
+        payload = [
+            {
+                "id": int(r["id"]),
+                "supplier_name": str(r.get("supplier_name") or ""),
+                "item_name": str(r.get("item_name") or ""),
+                "current_sector": str(r.get("sektor") or ""),
+            }
+            for r in batch
+        ]
+        prompt = (
+            "MKYS geçmiş alım kayıtlarındaki tedarikçi firmaları denetle ve her kaydın gerçek ticari sektörünü belirle.\n"
+            f"KAYITLAR:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "Yanıtı YALNIZCA şu JSON şemasında ver:\n"
+            '{"decisions": [{"id": 1, "keep": true, "real_sector": "Gerçek Ticari Sektör"}]}\n'
+            "Kurallar:\n"
+            "- Kamu kurumu (DMO, hastane, bakanlık vb.), spam, anlamsız veya geçersiz firma adıysa keep: false ver.\n"
+            "- Gerçek ticari firma ise keep: true ver ve satılan kaleme göre gerçek ticari sektörü yaz.\n"
+        )
+        data, err = _call_gemini_json_strict(api_key, [prompt], timeout_ms=30000)
+        if err or not data or not isinstance(data.get("decisions"), list):
+            return {"pool_decisions": pool_decisions, "mkys_decisions": mkys_decisions, "error": err or "Geçersiz JSON"}
+        for d in data["decisions"]:
+            if isinstance(d, dict) and "id" in d:
+                mkys_decisions.append({
+                    "id": int(d["id"]),
+                    "keep": d.get("keep") is True,
+                    "real_sector": str(d.get("real_sector") or "").strip(),
+                })
+
+    return {"pool_decisions": pool_decisions, "mkys_decisions": mkys_decisions, "error": ""}

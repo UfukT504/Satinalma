@@ -24,18 +24,25 @@ import db as _db_mod
 import doc_generator as _doc_gen_mod
 import search_engine as _search_mod
 
-if not hasattr(_ai_parser_mod, "parse_mkys_excel"):
+if not hasattr(_ai_parser_mod, "verify_suppliers_with_ai"):
     _ai_parser_mod = importlib.reload(_ai_parser_mod)
-if not hasattr(_db_mod, "get_mkys_stats"):
+if not hasattr(_db_mod, "increment_supplier_trust"):
     _db_mod = importlib.reload(_db_mod)
 if not hasattr(_doc_gen_mod, "build_market_research_docx"):
     _doc_gen_mod = importlib.reload(_doc_gen_mod)
 if not hasattr(_search_mod, "run_three_ring_search"):
     _search_mod = importlib.reload(_search_mod)
 
-from ai_parser import parse_demand_form, parse_mkys_excel, parse_offer_document, parse_tr_number
+from ai_parser import (
+    parse_demand_form,
+    parse_mkys_excel,
+    parse_offer_document,
+    parse_tr_number,
+    sanitize_pool_batch_with_ai,
+)
 from db import (
     add_case_suppliers,
+    apply_pool_sanitization_results,
     create_case,
     delete_case,
     delete_case_offer,
@@ -46,11 +53,14 @@ from db import (
     get_case_offers,
     get_case_suppliers,
     get_mkys_stats,
+    get_unverified_pool_records,
     import_mkys_records,
+    increment_supplier_trust,
     init_db,
     list_cases,
     save_default_commission,
     save_item_intel,
+    seed_unverified_from_xlsx,
     sync_case_items,
     update_case_meta,
     update_supplier_selections_and_edits,
@@ -630,9 +640,22 @@ def render_step2(
                         for r in recs:
                             if not r.get("sector"):
                                 r["sector"] = ", ".join(infer_product_groups(r["item_name"])) or "Genel Tedarik (MKYS)"
-                        ins, tot = import_mkys_records(recs)
-                        st.success(f"✅ {ins} yeni MKYS kaydı veritabanına eklendi (Toplam MKYS havuzu: {tot} kayıt).")
-                        st.rerun()
+                        ins, tot = import_mkys_records(recs, ai_verified=0)
+                        if gemini_key:
+                            with st.spinner("Yüklenen MKYS kayıtları Gemini AI ile doğrulanıyor ve sektörlendiriliyor..."):
+                                unv = get_unverified_pool_records(limit=200)
+                                san = sanitize_pool_batch_with_ai(unv["pool"], unv["mkys"], gemini_key, batch_size=20)
+                            if san.get("error"):
+                                st.error(f"Gemini AI doğrulama hatası (Fail-Closed): {san['error']}")
+                            else:
+                                res_san = apply_pool_sanitization_results(san["pool_decisions"], san["mkys_decisions"])
+                                st.success(
+                                    f"✅ {ins} MKYS kaydı işlendi · {res_san['verified']} doğrulanmış firma havuza alındı, "
+                                    f"{res_san['deleted']} geçersiz/kamu kaydı elendi."
+                                )
+                                st.rerun()
+                        else:
+                            st.error("GEMINI_API_KEY tanımlı değil. Fail-Closed kuralı gereği yüklenen kayıtlar doğrulanamadığı için aramalara dahil edilmedi.")
 
     if not items:
         st.info("Tedarikçi aramadan önce **1. İstem Formu & Kalemler** adımından en az bir kalem ekleyin.")
@@ -696,6 +719,7 @@ def render_step2(
         total_steps = len(selected_item_names) * (end_round - start_round + 1)
         step_done = 0
         found_total: list[dict[str, Any]] = []
+        search_stats: dict[str, Any] = {"inspected_count": 0, "ai_rejected_count": 0, "verified_added_count": 0, "errors": []}
 
         for idx, it_name in enumerate(selected_item_names, start=1):
             it_obj = item_by_name.get(it_name, {})
@@ -717,6 +741,8 @@ def render_step2(
                     max_sites=DEFAULT_MAX_SITES,
                     round_num=r_num,
                     skip_domains=visited_domains,
+                    api_key=gemini_key,
+                    stats_out=search_stats,
                 )
                 found_total.extend(rows)
                 save_cache(CACHE_XLSX, cache)
@@ -727,7 +753,13 @@ def render_step2(
         st.session_state[round_state_key] = end_round
         st.session_state[visited_state_key] = visited_domains
         elapsed = round(time.time() - t0, 1)
-        status_slot.success(f"✅ Tarama {elapsed} sn'de tamamlandı · {len(found_total)} kayıt incelendi, {added_count} yeni firma dosyaya eklendi.")
+        st.session_state[f"search_summary_{case_id}"] = {
+            "inspected": int(search_stats.get("inspected_count", 0)),
+            "rejected": int(search_stats.get("ai_rejected_count", 0)),
+            "verified_added": added_count if added_count > 0 else int(search_stats.get("verified_added_count", 0)),
+            "elapsed": elapsed,
+            "errors": list(search_stats.get("errors") or []),
+        }
         st.rerun()
 
     if run_search:
@@ -735,6 +767,16 @@ def render_step2(
         _execute_search(1, target_rounds)
     elif run_next_round:
         _execute_search(next_round, next_round)
+
+    summary_info = st.session_state.get(f"search_summary_{case_id}")
+    if summary_info:
+        for err_msg in summary_info.get("errors") or []:
+            st.error(f"🚨 {err_msg}")
+        st.info(
+            f"Tarama tamamlandı: Toplam **{summary_info['inspected']}** site incelendi, "
+            f"Gemini AI tarafından **{summary_info['rejected']}** alakasız/spam site elendi, "
+            f"**{summary_info['verified_added']}** doğrulanmış tedarikçi eklendi. ({summary_info['elapsed']} sn)"
+        )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -964,7 +1006,7 @@ def render_step2(
 # Adım 3: Resmi Teklife Davet Mektubu (.docx)
 # ---------------------------------------------------------------------------
 
-def render_step3(case_data: dict[str, Any], items: list[dict[str, Any]]) -> None:
+def render_step3(case_data: dict[str, Any], items: list[dict[str, Any]], suppliers: list[dict[str, Any]]) -> None:
     case_id = int(case_data["id"])
     st.markdown(
         '<div class="clean-card"><div class="card-title">Resmi Teklife Davet Mektubu (.docx)</div>'
@@ -1056,12 +1098,23 @@ def render_step3(case_data: dict[str, Any], items: list[dict[str, Any]]) -> None
         deadline_time=deadline_time,
         case_title=case_data["title"],
     )
+    invited_idents = [
+        (s.get("domain") or s.get("company_name") or "").strip()
+        for s in suppliers
+        if s.get("selected") and (s.get("domain") or s.get("company_name"))
+    ]
+
+    def _on_invitation_download() -> None:
+        if invited_idents:
+            increment_supplier_trust(invited_idents, delta=1)
+
     st.download_button(
         "📄 Resmi Teklife Davet Mektubunu İndir (.docx)",
         data=docx_bytes,
         file_name=f"teklife_davet_mektubu_{case_id}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         width="stretch",
+        on_click=_on_invitation_download,
     )
 
     with st.expander("✉️ Kısa E-posta Konusu ve Gövde Metni (Kopyala/Yapıştır)", expanded=False):
@@ -1105,17 +1158,21 @@ def render_step4(
         if st.button("✨ Teklifleri Yapay Zeka ile Oku ve Ekle", type="primary", width="stretch", disabled=not offer_files, key=f"btn_parse_offers_{case_id}"):
             if offer_files:
                 ok_count = 0
+                boost_names: list[str] = []
                 with st.spinner(f"{len(offer_files)} teklif mektubu okunuyor..."):
                     for uf in offer_files:
                         parsed = parse_offer_document(uf.name, uf.getvalue(), items, gemini_key)
+                        f_name = parsed.get("firma_adi") or uf.name
                         upsert_case_offer(
                             case_id=case_id,
-                            firm_name=parsed.get("firma_adi") or uf.name,
+                            firm_name=f_name,
                             prices_by_item_id=parsed.get("prices") or {},
                             source_type="Dijital",
                             source_file=uf.name,
                         )
+                        boost_names.append(f_name)
                         ok_count += 1
+                increment_supplier_trust(boost_names, delta=1)
                 st.success(f"✅ {ok_count} dijital teklif tabloya eklendi.")
                 st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
@@ -1160,6 +1217,7 @@ def render_step4(
                     val = parse_tr_number(r.get("Birim Fiyat (TL)"), None)
                     prices[int(r["item_id"])] = val if (val is not None and val > 0) else None
                 upsert_case_offer(case_id=case_id, firm_name=man_firm.strip(), prices_by_item_id=prices, source_type="Manuel")
+                increment_supplier_trust([man_firm.strip()], delta=1)
                 st.success(f"✅ {man_firm.strip()} teklifi kaydedildi.")
                 st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
@@ -1356,6 +1414,35 @@ def render_step4(
 # Ana Uygulama Akışı
 # ---------------------------------------------------------------------------
 
+@st.cache_resource
+def auto_sanitize_pool() -> dict[str, int]:
+    """Uygulama açılışında bir kez çalışarak ai_verified = 0 kayıtları arka planda sessizce Gemini ile denetler."""
+    init_db()
+    try:
+        seed_unverified_from_xlsx(load_cache(CACHE_XLSX))
+    except Exception:
+        pass
+    gemini_key = get_secret("GEMINI_API_KEY", "")
+    if not gemini_key:
+        return {"deleted": 0, "verified": 0}
+
+    total_deleted = 0
+    total_verified = 0
+    for _ in range(5):
+        unv = get_unverified_pool_records(limit=60)
+        if not unv["pool"] and not unv["mkys"]:
+            break
+        san = sanitize_pool_batch_with_ai(unv["pool"], unv["mkys"], gemini_key, batch_size=20)
+        if not san["pool_decisions"] and not san["mkys_decisions"]:
+            break
+        res = apply_pool_sanitization_results(san["pool_decisions"], san["mkys_decisions"])
+        total_deleted += res["deleted"]
+        total_verified += res["verified"]
+        if san.get("error"):
+            break
+    return {"deleted": total_deleted, "verified": total_verified}
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Satın Alma Yönetim Sistemi",
@@ -1364,6 +1451,7 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     init_db()
+    auto_sanitize_pool()
     inject_minimal_css()
     if not check_optional_login():
         return
@@ -1417,7 +1505,7 @@ def main() -> None:
     with tab2:
         render_step2(case_data, items, suppliers, gemini_key)
     with tab3:
-        render_step3(case_data, items)
+        render_step3(case_data, items, suppliers)
     with tab4:
         render_step4(case_data, items, offers, gemini_key)
 
