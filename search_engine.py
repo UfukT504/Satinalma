@@ -41,22 +41,52 @@ HEADERS = {
     "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 
+# 1. Ziyaret Öncesi Domain Kara Listesi (Pazaryeri, Haber/Medya, İlan/Emlak/Oto/Gezi/Sözlük/Blog)
+NEWS_MEDIA_DOMAINS = {
+    "hurriyet.com.tr", "hurriyet.com", "milliyet.com.tr", "milliyet.com",
+    "sabah.com.tr", "sabah.com", "sozcu.com.tr", "sozcu.com",
+    "haberturk.com", "ensonhaber.com", "mynet.com", "onedio.com", "trthaber.com",
+    "aa.com.tr", "ntv.com.tr", "cnnturk.com", "cumhuriyet.com.tr", "yenisafak.com",
+    "star.com.tr", "aksam.com.tr", "takvim.com.tr", "posta.com.tr", "t24.com.tr",
+    "gazeteduvar.com.tr", "bloomberght.com", "dunya.com", "bbc.com", "dw.com",
+    "euronews.com", "haberler.com", "sondakika.com", "haber7.com", "internethaber.com",
+    "odatv.com", "tele1.com.tr", "birgun.net", "halktv.com.tr", "karar.com",
+    "turkiyegazetesi.com.tr", "yenicaggazetesi.com.tr", "fotomac.com.tr", "fanatik.com.tr",
+    "sporx.com", "medimagazin.com.tr", "medikalnews.com",
+}
+CLASSIFIED_BLOG_DOMAINS = {
+    "sahibinden.com", "arabam.com", "otosor.com", "hepsiemlak.com", "emlakjet.com",
+    "zingat.com", "gezirehberi.com", "tripadvisor.com", "tripadvisor.com.tr",
+    "blogspot.com", "wordpress.com", "medium.com", "eksisozluk.com", "uludagsozluk.com",
+    "instela.com", "kizlarsoruyor.com", "donanimhaber.com", "technopat.net", "shiftdelete.net",
+    "webtekno.com", "wixsite.com", "substack.com", "tumblr.com", "weebly.com",
+    "letgo.com", "dolap.com", "modacruz.com", "obilet.com", "enuygun.com",
+    "tatilsepeti.com", "etstur.com", "booking.com", "airbnb.com", "trivago.com.tr",
+    "biletix.com",
+}
 MARKETPLACE_DOMAINS = {
     "trendyol.com", "trendyolmilla.com", "hepsiburada.com", "n11.com",
     "amazon.com.tr", "amazon.com", "ciceksepeti.com", "pazarama.com",
-    "pttavm.com", "epttavm.com", "akakce.com", "cimri.com", "sahibinden.com",
+    "pttavm.com", "epttavm.com", "gittigidiyor.com", "akakce.com", "cimri.com",
     "idefix.com", "alibaba.com", "aliexpress.com", "ebay.com", "etsy.com",
     "teknosa.com", "vatanbilgisayar.com", "mediamarkt.com.tr", "migros.com.tr",
     "a101.com.tr", "bim.com.tr", "sokmarket.com.tr", "koctas.com.tr",
-    "bauhaus.com.tr", "decathlon.com.tr", "morhipo.com", "boyner.com.tr",
-    "kitapyurdu.com", "dr.com.tr", "wikipedia.org", "youtube.com",
-    "medikalnews.com", "medikalfirma.com", "beymen.com", "ebebek.com",
-    "doktortakvimi.com", "sikayetvar.com", "yandex.com.tr", "yandex.com",
-    "google.com", "bing.com", "yahoo.com", "duckduckgo.com",
-    "zhihu.com", "researchgate.net", "quora.com", "reddit.com", "pinterest.com",
+    "tekzen.com.tr", "tekzen.com", "bauhaus.com.tr", "decathlon.com.tr",
+    "morhipo.com", "boyner.com.tr", "kitapyurdu.com", "dr.com.tr", "wikipedia.org",
+    "medikalfirma.com", "beymen.com", "ebebek.com", "doktortakvimi.com", "sikayetvar.com",
+    "yandex.com.tr", "yandex.com", "google.com", "bing.com", "yahoo.com", "duckduckgo.com",
+    "zhihu.com", "researchgate.net", "quora.com", "reddit.com",
     "support.google.com", "apple.com", "microsoft.com",
+} | NEWS_MEDIA_DOMAINS | CLASSIFIED_BLOG_DOMAINS
+
+SOCIAL_DOMAINS = {
+    "linkedin.com", "instagram.com", "facebook.com", "x.com", "twitter.com",
+    "tiktok.com", "youtube.com", "youtu.be", "pinterest.com", "vimeo.com",
+    "dailymotion.com", "twitch.tv", "t.me", "telegram.me", "whatsapp.com",
 }
-SOCIAL_DOMAINS = {"linkedin.com", "instagram.com", "facebook.com", "x.com", "twitter.com", "tiktok.com"}
+DOMAIN_BLOCKED_SUBSTRINGS = ("haber", "gazete", "dergi")
+ALLOWED_COMMERCIAL_TLDS = (".tr", ".com", ".net", ".org")
+
 DIRECTORY_DOMAINS = {"firmasec.com", "bulurum.com"}
 TENDER_RESULT_DOMAINS = {"ilan.gov.tr", "ihalebul.com"}
 TENDER_PORTAL_HINTS = ("ekap.kik.gov.tr", "kik.gov.tr", "ilan.gov.tr", "ihalebul.com", "ihale.com", ".gov.tr", ".bel.tr", ".edu.tr")
@@ -71,6 +101,24 @@ MAINTENANCE_KEYWORDS = (
     "this domain may be for sale", "account suspended", "site askıya alındı",
 )
 
+# 3. Spam, Bahis ve Kredi Kalıpları
+SPAM_BETTING_RE = re.compile(
+    r"(?:\$1000|\blening\b|\bcasino\b|\bbahis\b|\bbetting\b|\bslot\b|\bjackpot\b|\bfreespin\b|"
+    r"\bdeneme\s+bonusu\b|\bporn\b|\bxxx\b|\bviagra\b|\bcialis\b|\bcrypto\b|\bforex\b|"
+    r"\bloan\b|\bpayday\b|\bcanlı\s+bahis\b|\bkaçak\s+bahis\b)",
+    re.IGNORECASE,
+)
+TR_CORP_PAGE_TERMS = (
+    "iletişim", "iletisim", "hakkımızda", "hakkimizda", "adres", "tel",
+    "vergi", "ticaret", "sanayi", "ltd", "şti", "sti", "a.ş", "a.s",
+    "medikal", "kurumsal", "ürünlerimiz", "urunlerimiz",
+)
+TR_CORP_TITLE_RE = re.compile(
+    r"\b(?:limited\s+şirketi|ltd\.?\s*şti\.?|anonim\s+şirketi|a\.?\s*ş\.?|san\.?\s*(?:ve\s*)?tic\.?)\b",
+    re.IGNORECASE,
+)
+TR_PHONE_VALID_RE = re.compile(r"(?:\+?90|0)\s*\(?\s*[235]\d{2}\s*\)?[\s.\-]*\d{3}[\s.\-]*\d{2}[\s.\-]*\d{2}")
+
 EMAIL_RE = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,10}\b")
 PHONE_RE = re.compile(r"(?:\+90|0)\s*(?:\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*\d{2}[\s.\-]*\d{2})")
 YEAR_RE = re.compile(r"\b(20[1-3]\d)\b")
@@ -81,6 +129,30 @@ COMPANY_NAME_RE = re.compile(
 TENDER_CONTRACTOR_LABEL_RE = re.compile(
     r"(?:Yüklenici(?:\s+Adı|\s+Firma|\s+Ünvanı|\s+Unvanı)?|İhaleyi\s+Alan|Kazanan\s+Firma|Sözleşme\s+İmzalanan(?:\s+Firma)?)\s*[:\-]\s*([^\n\r|;]{4,140})",
     re.IGNORECASE,
+)
+COPYRIGHT_COMPANY_RE = re.compile(
+    r"(?:©|&copy;|copyright|tüm\s+hakları\s+saklıdır)\s*(?:20\d{2}(?:\s*[-–]\s*20\d{2})?)?\s*([^\n\r|<]{3,65})",
+    re.IGNORECASE,
+)
+
+# 4. Genel Sayfa Başlıkları Kara Listesi
+GENERIC_PAGE_TITLES = {
+    "ana sayfa", "anasayfa", "home", "homepage", "index", "iletisim", "iletişim",
+    "contact", "contact us", "bize ulasin", "bize ulaşın", "hakkimizda", "hakkımızda",
+    "about", "about us", "urunlerimiz", "ürünlerimiz", "urunler", "ürünler", "products",
+    "kategoriler", "categories", "magaza", "mağaza", "shop", "store", "sepetim", "sepet",
+    "cart", "404", "sayfa bulunamadi", "sayfa bulunamadı", "not found", "hos geldiniz",
+    "hoş geldiniz", "welcome", "giris", "giriş", "login", "blog", "haberler", "kurumsal",
+    "hizmetlerimiz", "referanslar", "galeri", "kvkk", "gizlilik politikasi",
+}
+
+DOMAIN_SPLIT_WORDS = (
+    "medikal", "medical", "saglik", "health", "kimya", "kimyasal", "ticaret", "sanayi",
+    "makina", "makine", "teknik", "teknoloji", "grup", "group", "elektronik", "elektrik",
+    "mobilya", "dental", "ilac", "ecza", "tekstil", "ambalaj", "gida", "yapi", "hirdavat",
+    "otomotiv", "muhendislik", "sistem", "bilisim", "yazilim", "lojistik", "insaat",
+    "enerji", "temizlik", "hijyen", "laboratuvar", "tibbi", "cihaz", "sarf", "tedarik",
+    "pazarlama", "ithalat", "ihracat", "buro", "ofis", "depo", "deposu", "holding",
 )
 
 IGNORED_EMAIL_DOMAINS = {
@@ -119,63 +191,83 @@ BOILERPLATE_LINE_RE = re.compile(
 PRODUCT_GROUPS: dict[str, dict[str, Any]] = {
     "Yoğun Bakım & Solunum": {
         "keywords": ("ventilatör", "ventilator", "oksijen", "cpap", "bipap", "spo2", "nabız", "oksimetre", "entübasyon", "aspiratör", "monitör", "defibrilatör", "yoğun bakım", "anestezi"),
-        "queries": ["yoğun bakım cihazları medikal distribütör türkiye"],
+        "queries": ["yoğun bakım cihazları medikal tedarik"],
     },
     "Ameliyathane & Cerrahi": {
         "keywords": ("laparoskop", "trokar", "bistüri", "koter", "cerrahi", "ameliyat", "sütür", "forseps", "endoskop"),
-        "queries": ["cerrahi el aletleri ameliyathane medikal tedarikçi türkiye"],
+        "queries": ["cerrahi el aletleri ameliyathane medikal toptan satış"],
     },
     "Kardiyoloji & EKG": {
         "keywords": ("ekg", "elektrokardiyografi", "holter", "efor", "stent", "anjiyo", "kardiyoloji", "tansiyon"),
-        "queries": ["kardiyoloji cihazları ekg medikal distribütör türkiye"],
+        "queries": ["kardiyoloji cihazları ekg medikal fiyat teklifi"],
     },
     "Laboratuvar & Patoloji": {
         "keywords": ("santrifüj", "mikroskop", "otoanalizör", "pcr", "pipet", "reaktif", "laboratuvar", "hematoloji", "biyokimya"),
-        "queries": ["tıbbi laboratuvar cihazları distribütör türkiye"],
+        "queries": ["tıbbi laboratuvar cihazları medikal tedarik"],
     },
     "Görüntüleme & Radyoloji": {
         "keywords": ("\\bultrason\\b", "usg", "röntgen", "tomografi", "emg", "radyoloji", "ultrason prob", "mamografi"),
-        "queries": ["tıbbi görüntüleme ultrason röntgen distribütör türkiye"],
+        "queries": ["tıbbi görüntüleme ultrason röntgen tedarik"],
     },
     "Sterilizasyon & Dezenfeksiyon": {
         "keywords": ("otoklav", "sterilizasyon", "dezenfektan", "plazma", "indikatör", "steril"),
-        "queries": ["sterilizasyon otoklav cihazları üretici distribütör türkiye"],
+        "queries": ["sterilizasyon otoklav cihazları toptan satış"],
     },
     "Medikal Sarf & Ecza": {
         "keywords": ("enjektör", "eldiven", "kateter", "kanül", "maske", "gazlı bez", "serum", "sonda", "sarf", "ilaç", "ecza", "ampul", "flakon"),
-        "queries": ["medikal sarf malzemeleri toptan tedarikçi türkiye", "ecza deposu kurumsal iletişim"],
+        "queries": ["medikal sarf malzemeleri toptan satış", "ecza deposu iletişim"],
     },
     "Dental / Diş": {
         "keywords": ("\\bdiş\\b", "dental", "diş üniti", "\\bünit\\b", "türbin", "aerotor", "endodonti", "implant"),
-        "queries": ["dental cihaz malzeme deposu türkiye"],
+        "queries": ["dental cihaz malzeme deposu tedarik"],
     },
     "Biyomedikal Bakım & Kalibrasyon": {
         "keywords": ("bakım", "onarım", "kalibrasyon", "teknik servis", "periyodik", "tıbbi gaz", "biyomedikal"),
-        "queries": ["biyomedikal teknik servis kalibrasyon firmaları türkiye"],
+        "queries": ["biyomedikal teknik servis kalibrasyon fiyat teklifi"],
     },
     "Fizik Tedavi & Hastane Demirbaş": {
         "keywords": ("fizik tedavi", "ortopedi", "tekerlekli sandalye", "hasta yatağı", "sedye", "muayene masası", "alt değiştirme", "bakım ünitesi", "hastane mobilyası", "tıbbi mobilya"),
-        "queries": ["hastane mobilyaları tıbbi demirbaş üretici"],
+        "queries": ["hastane mobilyaları tıbbi demirbaş toptan satış"],
     },
     "Pediatri, Bebek & Ölçüm Cihazları": {
         "keywords": ("bebek", "yenidoğan", "pediatri", "baskül", "terazi", "tartı", "boy ve kilo", "boy kilo", "alt değiştirme", "küvöz"),
-        "queries": ["medikal bebek baskülü terazi boy ölçer tedarikçi"],
+        "queries": ["medikal bebek baskülü terazi boy ölçer tedarik"],
     },
     "Endüstriyel Kimya & Glikol": {
         "keywords": ("antifriz", "glikol", "etilen", "monoetilen", "propilen", "kimyasal", "kazan kimyasal", "su şartlandırma", "klor", "asit"),
-        "queries": ["etilen glikol monoetilen glikol tedarikçi satış iletişim"],
+        "queries": ["etilen glikol monoetilen glikol toptan satış"],
     },
     "İklimlendirme, Chiller & HVAC": {
         "keywords": ("chiller", "klima", "soğutma", "fancoil", "kazan", "brülör", "havalandırma", "kompresör"),
-        "queries": ["chiller soğutma kimyasalları antifriz tedarikçi iletişim"],
+        "queries": ["chiller soğutma kimyasalları antifriz tedarik"],
     },
     "Yapı, Hırdavat & İş Güvenliği": {
-        "keywords": ("kaydırmaz", "bant", "boya", "kilit", "hırdavat", "el aleti", "iş güvenliği", "kablo", "led"),
-        "queries": ["endüstriyel hırdavat iş güvenliği toptan tedarikçi türkiye"],
+        "keywords": ("kaydırmaz", "bant", "boya", "kilit", "hırdavat", "el aleti", "iş güvenliği", "vida", "civata", "matkap"),
+        "queries": ['"Yapı ve Hırdavat Malzemeleri" toptan satış "Ltd. Şti." OR "A.Ş." iletişim'],
     },
-    "Temizlik, Hijyen & Mutfak": {
-        "keywords": ("deterjan", "kağıt havlu", "çöp poşeti", "temizlik", "mutfak", "hijyen"),
-        "queries": ["endüstriyel temizlik kimyasalları toptan satış iletişim"],
+    "Sıhhi Tesisat & Yapı Malzemeleri": {
+        "keywords": ("lavabo", "batarya", "musluk", "klozet", "sifon", "rezervuar", "pvc boru", "vana", "armatür", "tesisat", "vitrifiye", "seramik"),
+        "queries": ['"Sıhhi Tesisat ve Yapı Malzemeleri" toptan satış "Ltd. Şti." OR "A.Ş." iletişim'],
+    },
+    "Büro Makineleri, Kırtasiye & Toner": {
+        "keywords": ("toner", "kartuş", "fotokopi", "a4 kağıt", "kağıt", "klasör", "kırtasiye", "kalem", "dosya", "zarf", "baskı"),
+        "queries": ['"Büro Makineleri ve Sarf Malzemeleri" toptan satış "Ltd. Şti." OR "A.Ş." iletişim'],
+    },
+    "Bilişim, Bilgisayar & Ağ Sistemleri": {
+        "keywords": ("bilgisayar", "laptop", "monitör", "yazıcı", "tarayıcı", "sunucu", "switch", "router", "ssd", "ram", "barkod", "ups"),
+        "queries": ['"Bilişim Teknolojileri ve Donanım" kurumsal tedarik teklif e-posta'],
+    },
+    "Elektrik & Aydınlatma Malzemeleri": {
+        "keywords": ("kablo", "led", "armatür", "priz", "anahtar", "sigorta", "pano", "aydınlatma", "jeneratör", "trafo"),
+        "queries": ['"Elektrik ve Aydınlatma Malzemeleri" toptan satış "Ltd. Şti." OR "A.Ş." iletişim'],
+    },
+    "Ofis & Kurum Mobilyası": {
+        "keywords": ("çalışma masası", "ofis koltuğu", "dolap", "keson", "sandalye", "etajer", "bekleme koltuğu", "mobilya"),
+        "queries": ['"Ofis ve Kurum Mobilyaları" toptan satış "Ltd. Şti." OR "A.Ş." iletişim'],
+    },
+    "Temizlik, Hijyen & Gıda": {
+        "keywords": ("deterjan", "kağıt havlu", "çöp poşeti", "temizlik", "mutfak", "hijyen", "gıda", "erzak", "çay", "kahve"),
+        "queries": ['"Endüstriyel Temizlik ve Hijyen Malzemeleri" toptan satış iletişim'],
     },
 }
 
@@ -215,6 +307,12 @@ def tr_lower(text: str) -> str:
 
 def tr_upper(text: str) -> str:
     return text.replace("i", "İ").replace("ı", "I").upper()
+
+
+def _fold_tr(text: str) -> str:
+    """Türkçe karakterleri ASCII karşılıklarına katlayarak esnek anahtar kelime eşleşmesi sağlar."""
+    low = tr_lower(text)
+    return low.translate(str.maketrans("çğıöşü", "cgiosu"))
 
 
 def detect_procurement_type(items: list[str]) -> str:
@@ -259,7 +357,8 @@ def infer_product_groups(text: str) -> list[str]:
     return matched
 
 
-def build_smart_queries(item_name: str) -> dict[str, Any]:
+def build_smart_queries(item_name: str, sector_name: str = "") -> dict[str, Any]:
+    """Tedarikçi odaklı genel B2B sorgu kalıpları üretir (toptan satış, ihale yüklenicisi, bölgesel tedarik)."""
     raw = str(item_name).strip()
     paren_parts = [p.strip() for p in re.findall(r"\(([^)]+)\)", raw) if len(p.strip()) >= 3]
     outside = re.sub(r"\([^)]*\)", " ", raw)
@@ -271,13 +370,14 @@ def build_smart_queries(item_name: str) -> dict[str, Any]:
     if any("etilen" in tr_lower(p) and "glikol" in tr_lower(p) for p in paren_parts):
         alt = "monoetilen glikol"
 
+    sec = (sector_name or ", ".join(infer_product_groups(item_name)) or "Kurumsal Tedarik").split(",")[0].strip()
     b2b_queries = [
+        f'"{sec}" toptan satış "Ltd. Şti." OR "A.Ş." iletişim',
+        f'"{base}" "yüklenici" OR "ihale sonucu" sözleşme',
+        f'"{sec}" kurumsal tedarik teklif e-posta',
+        f'"{sec}" Balıkesir OR İzmir OR Bursa toptan iletişim',
         f"{base} toptan satış tedarikçi iletişim",
-        f"{base} imalatçı üretici fabrika iletişim",
-        f"{alt} distribütör yetkili satıcı teklif",
-        f"{base} ihale yüklenicisi doğrudan temin firma",
-        f"site:firmasec.com {base} OR site:bulurum.com {base}",
-        f'{base} toptan ("info@" OR "@gmail.com")',
+        f'{alt} fiyat teklifi iletişim "@"',
     ]
     tender_queries = [
         f"site:ilan.gov.tr {base} ihale sonucu yüklenici",
@@ -314,81 +414,23 @@ def save_ai_cache(cache_data: dict[str, dict[str, Any]]) -> None:
 
 def analyze_item_with_gemini(item_name: str, api_key: str, ai_cache: dict[str, dict[str, Any]]) -> dict[str, Any]:
     cache_key = re.sub(r"\s+", " ", item_name.strip().lower())
-    fallback_smart = build_smart_queries(item_name)
+    inferred_sector = ", ".join(infer_product_groups(item_name)) or "Kurumsal Tedarik"
+    fallback_smart = build_smart_queries(item_name, inferred_sector)
     if cache_key in ai_cache:
         cached = dict(ai_cache[cache_key])
-        if len(cached.get("b2b_sorgular") or []) >= 6 or not api_key:
+        if cached.get("schema_v2") or not api_key:
             if not cached.get("b2b_sorgular"):
                 cached["b2b_sorgular"] = fallback_smart["queries"]
             cached["source"] = f"{cached.get('source', 'ai_cache')} (Önbellek)"
             return cached
 
-    fallback_result = {
-        "aciklama": (
-            f"{item_name} kalemi hastane birimlerinin doğrudan temin ve piyasa fiyat araştırması kapsamında ihtiyaç duyduğu ürün/hizmettir. "
-            "Türkiye'de yetkili medikal, teknik veya endüstriyel tedarikçilerden teklif toplanır."
-        ),
-        "es_anlamlilar": [item_name],
-        "ust_kategori": ", ".join(infer_product_groups(item_name)) or "Kurumsal Tedarik",
-        "markalar": [],
-        "b2b_sorgular": fallback_smart["queries"],
-        "source": "Yerel Analiz",
-    }
-    if not api_key:
-        return fallback_result
+    from ai_parser import generate_sector_and_b2b_queries
 
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError:
-        return fallback_result
-
-    prompt = (
-        f"Kamu hastanesi satın alma birimi için şu kalemi analiz et: '{item_name}'.\n"
-        "Yanıtı YALNIZCA aşağıdaki anahtarlara sahip geçerli bir JSON nesnesi olarak ver:\n"
-        "- aciklama: Tam olarak 2 cümle; ürünün/hizmetin ne işe yaradığını ve hangi alanda kullanıldığını açıkla.\n"
-        "- es_anlamlilar: Türkiye piyasasında bu kalem için kullanılan 3-5 adet eş anlamlı kelime/arama terimi listesi.\n"
-        "- ust_kategori: Bu ürünün ana sektörü / tedarikçi türü (ör. 'Medikal Cihaz Distribütörü', 'Tıbbi Sarf Malzeme', 'Endüstriyel Kimya', 'Hastane Mobilyası', 'Yapı & Hırdavat' vb.).\n"
-        "- markalar: Türkiye'de bilinen 2-4 üretici veya ana marka adı listesi (yoksa boş liste).\n"
-        "- b2b_sorgular: Türkiye'deki tedarikçileri bulmak için TAM OLARAK 6 farklı B2B arama sorgusu listesi (sırasıyla: "
-        "1) toptan satış sorgusu, "
-        "2) imalatçı / üretici sorgusu, "
-        "3) Türkiye distribütörü / yetkili satıcı sorgusu, "
-        "4) ihale yüklenicisi / doğrudan temin sorgusu, "
-        "5) site:firmasec.com veya site:bulurum.com rehber tarama sorgusu, "
-        "6) doğrudan e-posta yakalayan operatörlü sorgu — örn. ürün adı + toptan + (\"info@\" OR \"@gmail.com\")).\n"
-    )
-    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=12000))
-    for model_name in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash"):
-        try:
-            resp = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
-            )
-            data = json.loads(resp.text or "{}")
-            if data.get("aciklama"):
-                b2b = [str(x).strip() for x in (data.get("b2b_sorgular") or []) if str(x).strip()][:6]
-                if len(b2b) < 6:
-                    for fbq in fallback_smart["queries"]:
-                        if fbq not in b2b:
-                            b2b.append(fbq)
-                        if len(b2b) >= 6:
-                            break
-                result = {
-                    "aciklama": str(data.get("aciklama", "")).strip(),
-                    "es_anlamlilar": [str(x).strip() for x in (data.get("es_anlamlilar") or []) if str(x).strip()][:5],
-                    "ust_kategori": str(data.get("ust_kategori", "")).strip(),
-                    "markalar": [str(x).strip() for x in (data.get("markalar") or []) if str(x).strip()][:4],
-                    "b2b_sorgular": b2b,
-                    "source": model_name,
-                }
-                ai_cache[cache_key] = result
-                save_ai_cache(ai_cache)
-                return result
-        except Exception:
-            continue
-    return fallback_result
+    result = generate_sector_and_b2b_queries(item_name, api_key, fallback_sector=inferred_sector)
+    if api_key and result.get("schema_v2"):
+        ai_cache[cache_key] = result
+        save_ai_cache(ai_cache)
+    return result
 
 
 def _root_domain(url_or_domain: str) -> str:
@@ -405,8 +447,21 @@ def _domain_matches(domain: str, domain_set: set[str]) -> bool:
     return any(domain == d or domain.endswith("." + d) for d in domain_set)
 
 
+def _is_allowed_commercial_tld(domain: str) -> bool:
+    """Yalnızca .tr, .com, .net, .org uzantılı ticari alan adlarına izin verir."""
+    return bool(domain) and any(domain.endswith(tld) for tld in ALLOWED_COMMERCIAL_TLDS)
+
+
 def _is_excluded_domain(domain: str) -> bool:
-    return _domain_matches(domain, MARKETPLACE_DOMAINS)
+    if not domain:
+        return True
+    if _domain_matches(domain, MARKETPLACE_DOMAINS):
+        return True
+    if any(sub in domain for sub in DOMAIN_BLOCKED_SUBSTRINGS):
+        return True
+    if not _is_allowed_commercial_tld(domain):
+        return True
+    return False
 
 
 def _is_social(domain: str) -> bool:
@@ -423,6 +478,16 @@ def _is_tender_result_domain(domain: str) -> bool:
 
 def _is_tender_domain(domain: str) -> bool:
     return any(domain == h or domain.endswith(h) or h in domain for h in TENDER_PORTAL_HINTS)
+
+
+def _is_pre_fetch_blocked(domain: str) -> bool:
+    """Ziyaret öncesi kara liste kontrolü: haber, ilan, blog, sosyal medya ve ticari olmayan TLD'ler."""
+    return (
+        not domain
+        or _is_social(domain)
+        or _is_excluded_domain(domain)
+        or _is_tender_domain(domain)
+    )
 
 
 def _normalize_phone(raw_phone: str) -> str:
@@ -499,12 +564,173 @@ def fetch_page(url: str, timeout: int = DEFAULT_TIMEOUT) -> tuple[int | None, st
         return None, url, ""
 
 
+# ---------------------------------------------------------------------------
+# 4. Akıllı Firma Adı Çıkarma ve Temizleme
+# ---------------------------------------------------------------------------
+
+def _is_generic_or_noisy_name(cand: str) -> bool:
+    if not cand:
+        return True
+    cleaned = re.sub(r"\s+", " ", cand).strip(" .,-:;|/•©")
+    if len(cleaned) < 2 or len(cleaned) > 50:
+        return True
+    folded = _fold_tr(cleaned)
+    if folded in GENERIC_PAGE_TITLES:
+        return True
+    if any(folded.startswith(g + " ") or folded.endswith(" " + g) for g in ("ana sayfa", "anasayfa", "home", "sepetim", "404")):
+        return True
+    if re.search(r"(?:₺|\$|€|\b\d+(?:[.,]\d+)?\s*(?:tl|try|usd|eur)\b)", cleaned, re.IGNORECASE):
+        return True
+    digits = sum(c.isdigit() for c in cleaned)
+    if digits >= 5 and digits / max(len(cleaned), 1) > 0.25:
+        return True
+    if cleaned.count(",") >= 2:
+        return True
+    return False
+
+
+def _sanitize_company_name(raw: str) -> str:
+    txt = re.sub(r"\s+", " ", str(raw or "")).strip(" .,-:;|/•©")
+    txt = re.sub(r"(?:20\d{2}\s*[-–]?\s*)+$", "", txt).strip(" .,-:;|")
+    txt = re.sub(r"\b(?:tüm hakları saklıdır|all rights reserved|copyright)\b.*$", "", txt, flags=re.IGNORECASE).strip(" .,-:;|")
+    txt = re.sub(r"(?:\+?90|0\d{3})[\d\s.\-]{6,}", "", txt).strip(" .,-:;|")
+    txt = re.sub(r"\b\d+(?:[.,]\d+)?\s*(?:tl|try|usd|eur|₺|\$|€)\b", "", txt, flags=re.IGNORECASE).strip(" .,-:;|")
+    return txt[:50].strip(" .,-:;|")
+
+
+def _humanize_domain_name(domain_or_email: str) -> str:
+    raw = str(domain_or_email or "").strip().lower()
+    if "@" in raw:
+        local, dom = raw.split("@", 1)
+        target_dom = dom if dom not in FREE_EMAIL_PROVIDERS else local
+    else:
+        target_dom = _root_domain(raw) or raw
+    stem = target_dom
+    for sfx in (".com.tr", ".net.tr", ".org.tr", ".gen.tr", ".biz.tr", ".com", ".net", ".org", ".tr"):
+        if stem.endswith(sfx):
+            stem = stem[: -len(sfx)]
+            break
+    stem = stem.replace("-", " ").replace("_", " ").replace(".", " ")
+    for w in DOMAIN_SPLIT_WORDS:
+        stem = re.sub(rf"([a-z0-9])({w})\b", r"\1 \2", stem)
+        stem = re.sub(rf"\b({w})([a-z0-9])", r"\1 \2", stem)
+    words = [p.capitalize() for p in stem.split() if p]
+    return (" ".join(words) or target_dom)[:50]
+
+
+def _extract_clean_company_name(
+    og_site_name: str,
+    copyright_cands: list[str],
+    title: str,
+    final_dom: str,
+    primary_email: str,
+    company_hint: str = "",
+) -> str:
+    # 0) Varsa temiz rehber/ihale ipucu
+    hint_clean = _sanitize_company_name(company_hint)
+    if hint_clean and not _is_generic_or_noisy_name(hint_clean):
+        return hint_clean
+
+    # 1) Telif / ünvan metni ("© 2026 ... Ltd. Şti." / "... A.Ş.") veya og:site_name
+    for cc in copyright_cands:
+        cand = _sanitize_company_name(cc)
+        if cand and not _is_generic_or_noisy_name(cand):
+            return cand
+
+    og_clean = _sanitize_company_name(og_site_name)
+    if og_clean and not _is_generic_or_noisy_name(og_clean) and "." not in og_clean:
+        return og_clean
+
+    # 2) <title> etiketini |, -, –, : işaretlerinden bölüp en temiz marka/firma parçasını al
+    if title:
+        parts = [ _sanitize_company_name(p) for p in re.split(r"\s*[|\-–:]+\s*", title) ]
+        valid_parts = [p for p in parts if p and not _is_generic_or_noisy_name(p)]
+        if valid_parts:
+            # Kurumsal ek içeren veya daha kısa olan marka parçasını seç
+            valid_parts.sort(key=lambda p: (0 if TR_CORP_TITLE_RE.search(p) else 1, len(p)))
+            return valid_parts[0]
+
+    # 3) Kurumsal e-posta veya web sitesi alan adından okunaklı firma adı üret
+    email_dom = primary_email.split("@")[-1] if ("@" in primary_email and primary_email.split("@")[-1] not in FREE_EMAIL_PROVIDERS) else ""
+    return _humanize_domain_name(email_dom or final_dom)
+
+
+# ---------------------------------------------------------------------------
+# 5. Kalem ve Sektör Uyumluluğu Yardımcıları
+# ---------------------------------------------------------------------------
+
+def _expand_tr_token_stems(clean_tok: str) -> set[str]:
+    out = {clean_tok}
+    for sfx in ("lari", "leri", "lar", "ler", "nin", "nun", "si", "su", "i", "u", "e", "a"):
+        if clean_tok.endswith(sfx) and len(clean_tok) - len(sfx) >= 4:
+            out.add(clean_tok[: -len(sfx)])
+            break
+    return out
+
+
+def build_item_relevance_profile(item_name: str, intel: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Aranan kalem ve yapay zeka/sektör eş anlamlılarından kök-duyarlı sayfa doğrulama anahtar kelimeleri üretir."""
+    intel = intel or {}
+    stop = {
+        "ve", "veya", "ile", "icin", "grubu", "tipi", "adet", "kutu", "set", "paket",
+        "malzeme", "malzemesi", "malzemeleri", "cihaz", "cihazi", "urun", "urunu", "satis", "toptan",
+        "tedarik", "tedarikci", "firma", "hizmet", "hizmeti", "alimi", "alımı",
+        "adli", "ozel", "genel", "tip", "yeni", "model", "marka",
+    }
+    raw_terms = [item_name] + list(intel.get("es_anlamlilar") or []) + list(intel.get("markalar") or [])
+    core_tokens: set[str] = set()
+    for term in raw_terms:
+        for w in re.split(r"[\s,/()\-]+", str(term or "")):
+            f = re.sub(r"[^a-z0-9]", "", _fold_tr(w))
+            if len(f) >= 3 and f not in stop:
+                core_tokens.update(_expand_tr_token_stems(f))
+
+    inferred = infer_product_groups(f"{item_name} {intel.get('ust_kategori', '')}")
+    sector_tokens: set[str] = set()
+    for g in inferred:
+        for kw in PRODUCT_GROUPS[g]["keywords"]:
+            clean_kw = re.sub(r"\\b", "", kw)
+            f_kw = _fold_tr(clean_kw).strip()
+            if len(f_kw) >= 3:
+                sector_tokens.add(f_kw)
+    for w in re.split(r"[\s,/()\-&]+", str(intel.get("ust_kategori") or "")):
+        f = re.sub(r"[^a-z0-9]", "", _fold_tr(w))
+        if len(f) >= 4 and f not in stop:
+            sector_tokens.update(_expand_tr_token_stems(f))
+
+    return {
+        "core_tokens": sorted(core_tokens),
+        "sector_tokens": sorted(sector_tokens),
+        "groups": inferred,
+    }
+
+
+def _is_page_relevant(relevance_text: str, profile: dict[str, Any] | None) -> bool:
+    if not profile:
+        return True
+    core = profile.get("core_tokens") or []
+    sector = profile.get("sector_tokens") or []
+    if not core and not sector:
+        return True
+    folded = _fold_tr(relevance_text)
+    if any(tok in folded for tok in core):
+        return True
+    sector_hits = sum(1 for kw in sector if kw in folded)
+    return sector_hits >= 2
+
+
 def _extract_contacts(html: str, base_url: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "html.parser")
     emails: set[str] = set()
     contact_links: list[str] = []
     external_links: list[str] = []
     base_dom = _root_domain(base_url)
+
+    og_el = soup.find("meta", attrs={"property": "og:site_name"}) or soup.find("meta", attrs={"name": "application-name"})
+    og_site_name = (og_el.get("content") or "").strip() if og_el else ""
+    desc_el = soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"property": "og:description"})
+    meta_desc = (desc_el.get("content") or "").strip() if desc_el else ""
+
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         hl = href.lower()
@@ -521,26 +747,67 @@ def _extract_contacts(html: str, base_url: str) -> dict[str, Any]:
             full = urljoin(base_url, href)
             if urlparse(full).scheme in ("http", "https"):
                 ldom = _root_domain(full)
-                if ldom and ldom != base_dom and not _is_excluded_domain(ldom) and not _is_social(ldom) and not _is_directory_domain(ldom):
+                if ldom and ldom != base_dom and not _is_pre_fetch_blocked(ldom) and not _is_directory_domain(ldom):
                     external_links.append(full)
+
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     text = soup.get_text(" ", strip=True)
     title = soup.title.string.strip() if soup.title and soup.title.string else ""
     h1_el = soup.find("h1")
     h1_text = h1_el.get_text(" ", strip=True) if h1_el else ""
+
+    # Yan menü / reklam gürültüsü hariç ana içerik metni (sektör uyumluluğu için)
+    main_soup = BeautifulSoup(html, "html.parser")
+    for tag in main_soup(["script", "style", "noscript", "aside", "nav"]):
+        tag.decompose()
+    main_el = main_soup.find("main") or main_soup.find("article") or main_soup.body
+    main_text = main_el.get_text(" ", strip=True) if main_el else text
+
+    # Footer / telif metninden ünvan adayları
+    copyright_cands: list[str] = []
+    footer_el = soup.find("footer")
+    footer_txt = footer_el.get_text(" ", strip=True) if footer_el else text[-2500:]
+    for m in COPYRIGHT_COMPANY_RE.finditer(footer_txt):
+        copyright_cands.append(m.group(1))
+    for m in COMPANY_NAME_RE.finditer(footer_txt):
+        copyright_cands.append(m.group(1))
+
     emails.update(m.lower() for m in EMAIL_RE.findall(text))
     phones = _dedupe_phones(PHONE_RE.findall(text))
     current_year = dt.date.today().year
     years = [int(y) for y in YEAR_RE.findall(text) if 2010 <= int(y) <= current_year + 1]
     is_maint = any(k in (title + " " + text[:4000]).lower() for k in MAINTENANCE_KEYWORDS)
+
     return {
-        "title": title, "h1": h1_text, "text": text, "emails": emails, "phones": phones,
+        "title": title,
+        "h1": h1_text,
+        "og_site_name": og_site_name,
+        "meta_desc": meta_desc,
+        "copyright_cands": copyright_cands,
+        "text": text,
+        "main_text": main_text,
+        "emails": emails,
+        "phones": phones,
         "max_year": max(years) if years else None,
-        "is_maintenance": is_maint, "contact_links": list(dict.fromkeys(contact_links))[:6],
+        "is_maintenance": is_maint,
+        "contact_links": list(dict.fromkeys(contact_links))[:6],
         "external_links": list(dict.fromkeys(external_links))[:5],
-        "groups": infer_product_groups(title + " " + text[:10000]),
+        "groups": infer_product_groups(title + " " + main_text[:10000]),
     }
+
+
+def _has_turkish_corporate_signal(text: str, phones: list[str], final_dom: str) -> bool:
+    """Türkçe dil varlığı + kurumsal ifade veya Türkiye telefon numarası doğrulaması."""
+    low = tr_lower(text[:30000])
+    has_tr_chars = bool(re.search(r"[çğıöşü]", low))
+    corp_hits = sum(1 for term in TR_CORP_PAGE_TERMS if term in low)
+    has_tr_phone = bool(TR_PHONE_VALID_RE.search(text[:30000])) or any(
+        re.sub(r"\D", "", p).startswith(("902", "903", "905", "02", "03", "05")) for p in phones
+    )
+    if not (has_tr_chars or final_dom.endswith(".tr") or corp_hits >= 2):
+        return False
+    return corp_hits >= 1 or has_tr_phone
 
 
 def inspect_company_website(
@@ -550,26 +817,46 @@ def inspect_company_website(
     page_timeout: int = DEFAULT_TIMEOUT,
     extra_emails: set[str] | None = None,
     extra_phones: list[str] | None = None,
+    relevance_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if _is_pre_fetch_blocked(dom):
+        return {"status": "Elendi (Kara Liste)", "rejected": True}
+
     status, final_url, html = fetch_page(f"https://{dom}", timeout=page_timeout)
     if status is None:
         status, final_url, html = fetch_page(f"http://{dom}", timeout=page_timeout)
     if status is None or status >= 400 or not html.strip():
-        return {"status": "Pasif"}
+        return {"status": "Pasif", "rejected": False}
+
+    final_dom = _root_domain(final_url)
+    if _is_pre_fetch_blocked(final_dom):
+        return {"status": "Elendi (Kara Liste)", "rejected": True}
 
     home = _extract_contacts(html, final_url)
-    final_dom = _root_domain(final_url)
-    if not final_dom.endswith(".tr"):
-        tr_hints = ("türkiye", "turkiye", "istanbul", "ankara", "izmir", "bursa", "iletisim", "iletişim", "ticaret", "sanayi", "+90")
-        if not any(h in html[:25000].lower() for h in tr_hints):
-            return {"status": "Elendi (Yurt Dışı)"}
     if home["is_maintenance"]:
-        return {"status": "Pasif (Bakımda)"}
+        return {"status": "Pasif (Bakımda)", "rejected": True}
+
+    combined_home_text = f"{home['title']} {home['meta_desc']} {home['text'][:25000]}"
+
+    # 3a) Yabancı spam / bahis / kredi kesin elemesi
+    if SPAM_BETTING_RE.search(combined_home_text):
+        return {"status": "Elendi (Spam/Bahis)", "rejected": True}
+
+    # 3b) Türkçe ve Türkiye ticari faaliyet kontrolü
+    if not _has_turkish_corporate_signal(combined_home_text, home["phones"], final_dom):
+        return {"status": "Elendi (Yurt Dışı / Kurumsal Değil)", "rejected": True}
+
+    # 5) Kalem ve sektör uyumluluğu kontrolü (yan menü/reklam hariç ana içerik)
+    relevance_surface = f"{home['title']} {home['h1']} {home['meta_desc']} {home['main_text'][:18000]}"
+    if not _is_page_relevant(relevance_surface, relevance_profile):
+        return {"status": "Elendi (Alakasız Sektör)", "rejected": True}
 
     all_emails = set(home["emails"]) | set(extra_emails or ())
     phones = _dedupe_phones(list(home["phones"]) + list(extra_phones or ()))
     years = [home["max_year"]] if home["max_year"] else []
     groups = set(home["groups"])
+    copyright_cands = list(home["copyright_cands"])
+    combined_all_text = combined_home_text
 
     cand_links: list[str] = []
     for fb in ("/iletisim", "/contact", "/iletişim", "/kurumsal", "/bize-ulasin"):
@@ -590,19 +877,43 @@ def inspect_company_website(
         cs, cu, ch = fetch_page(link, timeout=page_timeout)
         if cs and cs < 400 and ch:
             cd = _extract_contacts(ch, cu)
+            if SPAM_BETTING_RE.search(cd["text"][:15000]):
+                return {"status": "Elendi (Spam/Bahis)", "rejected": True}
             all_emails.update(cd["emails"])
             phones = _dedupe_phones(phones + cd["phones"])
             if cd["max_year"]:
                 years.append(cd["max_year"])
             groups.update(cd["groups"])
+            copyright_cands.extend(cd["copyright_cands"])
+            combined_all_text += " " + cd["text"][:10000]
 
     max_year = max(years) if years else None
     if max_year is not None and max_year < 2023 and not ignore_year_filter:
-        return {"status": f"Pasif ({max_year})"}
+        return {"status": f"Pasif ({max_year})", "rejected": True}
 
     prim, ordered = rank_emails(all_emails, final_dom)
+
+    # 3c) Yalnızca ücretsiz e-posta (@gmail, @hotmail, @yahoo vb.) varsa Türk şirket ünvanı veya +90/02/03/05 telefon şartı
+    has_corp_email = any(em.split("@")[-1] not in FREE_EMAIL_PROVIDERS for em in ordered)
+    if ordered and not has_corp_email:
+        has_corp_title = bool(TR_CORP_TITLE_RE.search(combined_all_text))
+        has_tr_phone = bool(TR_PHONE_VALID_RE.search(combined_all_text)) or any(
+            re.sub(r"\D", "", p).startswith(("902", "903", "905", "02", "03", "05")) for p in phones
+        )
+        if not (has_corp_title or has_tr_phone):
+            return {"status": "Elendi (Ücretsiz E-posta Doğrulanamadı)", "rejected": True}
+
+    clean_company = _extract_clean_company_name(
+        og_site_name=home["og_site_name"],
+        copyright_cands=copyright_cands,
+        title=home["title"],
+        final_dom=final_dom,
+        primary_email=prim,
+        company_hint=company_hint,
+    )
+
     return {
-        "company_name": (company_hint or home["title"].split("|")[0].split("-")[0].strip() or final_dom)[:80],
+        "company_name": clean_company,
         "domain": final_dom,
         "website": final_url,
         "primary_email": prim,
@@ -738,8 +1049,11 @@ def load_cache(cache_path: Path = CACHE_XLSX) -> dict[str, dict[str, Any]]:
             all_em = [x.strip().lower() for x in re.split(r"[,;]", str(r[4] or "")) if x.strip() and not x.strip().lower().endswith(".kep.tr")]
             pgroups = str(r[10] or "") if len(r) > 10 else ""
             sector = str(r[11] or "") if len(r) > 11 else ""
+            comp = str(r[0] or dom)
+            if _is_generic_or_noisy_name(comp):
+                comp = _humanize_domain_name(prim or dom)
             cache[dom] = {
-                "company_name": str(r[0] or dom), "domain": dom, "website": str(r[2] or ""),
+                "company_name": comp, "domain": dom, "website": str(r[2] or ""),
                 "primary_email": prim, "all_emails": all_em,
                 "phone": " / ".join(_dedupe_phones(re.split(r"[/,;]+", str(r[5] or "")))[:2]),
                 "status": str(r[6] or ""), "last_year": r[7] or "-", "last_checked": str(r[8] or ""),
@@ -807,8 +1121,13 @@ def _merge_firm_into_cache(cache: dict[str, dict[str, Any]], info: dict[str, Any
     info["phone"] = " / ".join(phones[:2])
     info["sector"] = merged_sector
     info["product_groups"] = merged_groups
+
+    comp_name = info.get("company_name") or existing.get("company_name") or dom
+    if _is_generic_or_noisy_name(comp_name):
+        comp_name = _humanize_domain_name(info["primary_email"] or dom)
+
     cache[dom] = {
-        "company_name": info.get("company_name") or existing.get("company_name") or dom,
+        "company_name": comp_name,
         "domain": dom,
         "website": info.get("website") or existing.get("website") or f"https://{dom}",
         "primary_email": info["primary_email"],
@@ -821,6 +1140,11 @@ def _merge_firm_into_cache(cache: dict[str, dict[str, Any]], info: dict[str, Any
         "product_groups": merged_groups,
         "sector": merged_sector,
     }
+    try:
+        import db
+        db.upsert_master_supplier(cache[dom], sector=sector_tag, item_name=str(info.get("item") or ""))
+    except Exception:
+        pass
 
 
 def search_cache_pool(item_name: str, intel: dict[str, Any], cache: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -836,7 +1160,9 @@ def search_cache_pool(item_name: str, intel: dict[str, Any], cache: dict[str, di
     tokens = {t for t in tokens if len(t) >= 3 and t not in stop}
 
     matched: list[tuple[int, dict[str, Any]]] = []
-    for _, entry in cache.items():
+    for dom, entry in cache.items():
+        if _is_pre_fetch_blocked(dom):
+            continue
         if not str(entry.get("status", "")).startswith("Aktif"):
             continue
         if not entry.get("primary_email") and not entry.get("phone"):
@@ -895,11 +1221,12 @@ def _extract_directory_leads(
                     comp_name = cd["h1"]
                 for ext_u in cd["external_links"]:
                     ed = _root_domain(ext_u)
-                    if ed:
+                    if ed and not _is_pre_fetch_blocked(ed):
                         ext_doms.append(ed)
+        cleaned_comp = _sanitize_company_name(comp_name)
         return {
             "href": href,
-            "comp_name": re.sub(r"\+90.*|0\d{3}.*", "", comp_name).strip()[:80] or "Rehber Firması",
+            "comp_name": cleaned_comp if not _is_generic_or_noisy_name(cleaned_comp) else "Rehber Firması",
             "emails": emails,
             "phones": phones,
             "ext_doms": list(dict.fromkeys(ext_doms)),
@@ -1027,7 +1354,7 @@ def _resolve_tender_contractors(
         for q in (f'"{core}" iletişim teklif', f"{core} iletişim"):
             for r in search_multi_engine(q, max_results=6, timeout=timeout):
                 dom = _root_domain(r.get("href", ""))
-                if not dom or _is_excluded_domain(dom) or _is_social(dom) or _is_tender_domain(dom) or _is_directory_domain(dom):
+                if _is_pre_fetch_blocked(dom) or _is_directory_domain(dom):
                     continue
                 snip = tr_lower(f"{r.get('title', '')} {r.get('body', '')}")
                 if tokens and tokens[0] not in snip and tokens[0] not in dom:
@@ -1047,10 +1374,13 @@ def _resolve_tender_contractors(
             page_timeout=timeout, extra_emails=fb_emails, extra_phones=fb_phones,
         )
         if not info.get("status", "").startswith("Aktif"):
+            if info.get("rejected"):
+                return None
             prim, ordered = rank_emails(fb_emails, matched_dom)
             if prim or fb_phones:
                 info = {
-                    "company_name": comp_name[:80], "domain": matched_dom,
+                    "company_name": _sanitize_company_name(comp_name) or _humanize_domain_name(matched_dom),
+                    "domain": matched_dom,
                     "website": fb_url or f"https://{matched_dom}",
                     "primary_email": prim, "all_emails": ordered,
                     "phone": " / ".join(_dedupe_phones(fb_phones)[:2]),
@@ -1063,7 +1393,7 @@ def _resolve_tender_contractors(
             return None
         info.update({
             "item": item_name,
-            "company_name": comp_name[:80],
+            "company_name": _sanitize_company_name(comp_name) or info.get("company_name") or _humanize_domain_name(matched_dom),
             "source": "İhale Sonuç Taraması",
             "match_type": "İhale Yüklenicisi (ilan.gov.tr / ihalebul.com)",
             "sector": sector_tag,
@@ -1081,22 +1411,22 @@ def _resolve_tender_contractors(
 def _build_round_queries(
     item_name: str, intel: dict[str, Any], round_num: int
 ) -> tuple[list[tuple[str, str, str, int]], list[str]]:
-    ust_kat = intel.get("ust_kategori") or ""
+    ust_kat = (intel.get("ust_kategori") or "").split(",")[0].strip()
     inferred = infer_product_groups(f"{item_name} {ust_kat}")
-    smart = build_smart_queries(item_name)
+    smart = build_smart_queries(item_name, ust_kat)
     syns = [s for s in (intel.get("es_anlamlilar") or []) if s]
     brands = [b for b in (intel.get("markalar") or []) if b]
 
     if round_num <= 1:
         gemini_b2b = [q for q in (intel.get("b2b_sorgular") or []) if q]
         ring1 = list(dict.fromkeys(gemini_b2b + smart["queries"]))[:6]
-        ring2 = [f"{ust_kat} türkiye tedarikçi iletişim"] if ust_kat else []
+        ring2 = [f'"{ust_kat}" toptan tedarik iletişim'] if ust_kat else []
         for g in inferred[:2]:
             ring2.extend(PRODUCT_GROUPS[g]["queries"][:1])
-        ring3 = [f"{m} türkiye distribütör iletişim" for m in brands[:2]]
+        ring3 = [f"{m} türkiye distribütör yetkili satıcı iletişim" for m in brands[:2]]
         specs = (
-            [(q, "Web Arama (B2B)", "1. Halka (6 B2B Sorgu)", 15) for q in ring1]
-            + [(q, "Web Arama (Kategori)", "2. Halka (Üst Kategori)", 12) for q in list(dict.fromkeys(ring2))[:3]]
+            [(q, "Web Arama (B2B)", "1. Halka (B2B Sektör & Toptan)", 15) for q in ring1]
+            + [(q, "Web Arama (Kategori)", "2. Halka (Üst Sektör)", 12) for q in list(dict.fromkeys(ring2))[:3]]
             + [(q, "Marka Taraması", "3. Halka (Marka)", 10) for q in ring3]
             + [(q, "Rehber Taraması", "Rehber (firmasec/bulurum)", 12) for q in smart["directory_queries"]]
             + [(q, "İhale Sonuç Taraması", "İhale (ilan.gov.tr/ihalebul)", 10) for q in smart["tender_queries"]]
@@ -1107,35 +1437,156 @@ def _build_round_queries(
     syn_b = syns[1] if len(syns) > 1 else syn_a
     if round_num == 2:
         extra_b2b = [
-            f"{syn_a} toptan satış fiyat teklif iletişim",
-            f"{syn_b} ithalatçı ana bayi türkiye",
-            f"{item_name} toptancı istanbul ankara izmir iletişim",
-            f'{syn_a} ("teklif@" OR "satis@" OR "ihale@")',
-            f"{ust_kat or item_name} yetkili satıcı firma rehberi",
-            f"{brands[0]} türkiye yetkili satıcı iletişim" if brands else f"{item_name} medikal firma iletişim",
+            f'"{ust_kat or syn_a}" toptan satış "Ltd. Şti." OR "A.Ş." iletişim',
+            f'"{syn_a}" "yüklenici" OR "ihale sonucu" sözleşme',
+            f'"{ust_kat or syn_b}" kurumsal tedarik teklif e-posta',
+            f'"{ust_kat or syn_a}" Balıkesir OR İzmir OR Bursa toptan iletişim',
+            f'{syn_b} toptan satış fiyat teklifi iletişim "@"',
+            f"{brands[0]} türkiye yetkili satıcı iletişim" if brands else f"{item_name} ithalatçı firma iletişim",
         ]
         extra_dir = [f"site:firmasec.com {syn_a}", f"site:bulurum.com {syn_a}"]
         extra_tender = [f"site:ilan.gov.tr {syn_a} yüklenici", f"site:ihalebul.com {syn_a}"]
     else:
-        cities = ["istanbul", "ankara", "izmir", "bursa", "antalya", "konya"]
+        cities = ["balıkesir", "izmir", "bursa", "istanbul", "ankara", "manisa"]
         city_hint = cities[(round_num - 3) % len(cities)]
         syn_pick = syns[(round_num - 1) % len(syns)] if syns else item_name
         extra_b2b = [
-            f"{syn_pick} tedarikçi {city_hint} iletişim",
-            f"{item_name} sanayi ticaret limited şirketi iletişim",
-            f'{item_name} ("kurumsal@" OR "info@" OR "satis@") {city_hint}',
-            f"{ust_kat or syn_pick} toptan tedarikçi türkiye",
-            f"{brands[(round_num - 1) % len(brands)]} türkiye distribütör" if brands else f"{syn_pick} imalatçı firma",
+            f'"{ust_kat or syn_pick}" {city_hint} toptan satış iletişim',
+            f'"{syn_pick}" toptan satış "Ltd. Şti." OR "A.Ş." {city_hint}',
+            f'{syn_pick} kurumsal tedarik teklif "@" {city_hint}',
+            f'"{ust_kat or syn_pick}" fiyat teklifi türkiye',
+            f"{brands[(round_num - 1) % len(brands)]} türkiye distribütör" if brands else f"{syn_pick} imalatçı firma iletişim",
         ]
         extra_dir = [f"site:firmasec.com {syn_pick} {city_hint}", f"site:bulurum.com {syn_pick} {city_hint}"]
         extra_tender = [f"site:ilan.gov.tr {syn_pick}", f"site:ihalebul.com {syn_pick} sonuç"]
 
     specs = (
-        [(q, f"Web Arama ({round_num}. Tur)", f"{round_num}. Tur (Yeni Sorgu)", 15) for q in list(dict.fromkeys(extra_b2b))]
+        [(q, f"Web Arama ({round_num}. Tur)", f"{round_num}. Tur (B2B Sorgu)", 15) for q in list(dict.fromkeys(extra_b2b))]
         + [(q, f"Rehber ({round_num}. Tur)", "Rehber (firmasec/bulurum)", 12) for q in extra_dir]
         + [(q, f"İhale ({round_num}. Tur)", "İhale (ilan.gov.tr/ihalebul)", 10) for q in extra_tender]
     )
     return specs, inferred
+
+
+def _resolve_mkys_priority_leads(
+    item_name: str,
+    sector_tag: str,
+    inferred: list[str],
+    synonyms: list[str],
+    cache: dict[str, dict[str, Any]],
+    progress_cb: Any = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> list[dict[str, Any]]:
+    """Önce MKYS geçmiş alımlarında ve Ana Firma Havuzunda eşleşen firmaları bulur; iletişimi eksik olanları web'den tamamlar."""
+    try:
+        import db
+        matched = db.query_mkys_and_master_suppliers(item_name, sector=sector_tag, synonyms=synonyms)
+    except Exception:
+        matched = []
+    if not matched:
+        return []
+
+    ready: list[dict[str, Any]] = []
+    to_lookup: list[dict[str, Any]] = []
+
+    for m in matched[:30]:
+        if not m.get("needs_contact_lookup"):
+            rec = {
+                "item": item_name,
+                "company_name": m["company_name"],
+                "domain": m.get("domain") or "",
+                "website": m.get("website") or "",
+                "primary_email": m.get("primary_email") or "",
+                "all_emails": m.get("all_emails") or [],
+                "phone": m.get("phone") or "",
+                "status": "Aktif (Havuz/MKYS)",
+                "last_year": "-",
+                "notes": f"Geçmiş kalemler: {', '.join((m.get('matched_items') or [])[:3])}",
+                "source": m.get("source") or "MKYS Geçmiş Alım",
+                "match_type": m.get("match_type") or "MKYS / Havuz Eşleşmesi",
+                "sector": sector_tag or m.get("sector") or "Kurumsal Tedarik",
+                "product_groups": _standardize_sector(m.get("sector", ""), inferred),
+            }
+            ready.append(rec)
+        else:
+            to_lookup.append(m)
+
+    to_lookup = to_lookup[:12]
+    if to_lookup and progress_cb:
+        progress_cb(f"{item_name}: MKYS/Havuz'dan {len(to_lookup)} geçmiş tedarikçinin web/e-posta bilgileri tamamlanıyor...")
+
+    def lookup_one(m: dict[str, Any]) -> dict[str, Any]:
+        comp_name = m["company_name"]
+        cl = _classify_supplier(comp_name)
+        core = cl["search_core"]
+        norm_core = tr_lower(core)
+        tokens = [t for t in re.split(r"\s+", norm_core) if len(t) >= 3]
+        matched_dom, fb_emails, fb_phones, fb_url = "", set(), [], ""
+
+        for q in (f'"{core}" iletişim teklif', f"{core} iletişim"):
+            for r in search_multi_engine(q, max_results=5, timeout=timeout):
+                dom = _root_domain(r.get("href", ""))
+                if _is_pre_fetch_blocked(dom) or _is_directory_domain(dom):
+                    continue
+                snip = tr_lower(f"{r.get('title', '')} {r.get('body', '')}")
+                if tokens and tokens[0] not in snip and tokens[0] not in dom:
+                    continue
+                matched_dom, fb_url = dom, r.get("href", "")
+                raw_snip = f"{r.get('title', '')} {r.get('body', '')}"
+                fb_emails.update(m_em.lower() for m_em in EMAIL_RE.findall(raw_snip))
+                fb_phones.extend(_dedupe_phones(PHONE_RE.findall(raw_snip)))
+                break
+            if matched_dom:
+                break
+
+        info: dict[str, Any] = {}
+        if matched_dom:
+            info = inspect_company_website(
+                matched_dom,
+                company_hint=comp_name,
+                ignore_year_filter=True,
+                page_timeout=timeout,
+                extra_emails=fb_emails,
+                extra_phones=fb_phones,
+                relevance_profile=None,
+            )
+        if not info.get("status", "").startswith("Aktif"):
+            prim, ordered = rank_emails(fb_emails, matched_dom)
+            info = {
+                "company_name": comp_name,
+                "domain": matched_dom,
+                "website": fb_url or (f"https://{matched_dom}" if matched_dom else ""),
+                "primary_email": prim,
+                "all_emails": ordered,
+                "phone": " / ".join(_dedupe_phones(fb_phones)[:2]),
+                "status": "Aktif (MKYS + Web)" if (prim or fb_phones) else "MKYS Kayıtlı (İletişim Bekliyor)",
+                "last_year": "-",
+                "notes": f"Geçmiş alım: {', '.join((m.get('matched_items') or [])[:2])}",
+            }
+        info.update({
+            "item": item_name,
+            "company_name": comp_name,
+            "source": "MKYS Geçmiş Alım (Web Tamamlandı)" if (info.get("primary_email") or info.get("phone")) else "MKYS Geçmiş Alım",
+            "match_type": m.get("match_type") or "MKYS Geçmiş Alım",
+            "sector": sector_tag or m.get("sector") or "Kurumsal Tedarik",
+            "product_groups": _standardize_sector(m.get("sector", ""), inferred),
+        })
+        if info.get("domain"):
+            _merge_firm_into_cache(cache, info, info["sector"], inferred)
+        else:
+            try:
+                import db
+                db.upsert_master_supplier(info, sector=info["sector"], item_name=item_name)
+            except Exception:
+                pass
+        return info
+
+    if to_lookup:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            for res in pool.map(lookup_one, to_lookup):
+                ready.append(res)
+
+    return ready
 
 
 def run_three_ring_search(
@@ -1147,26 +1598,54 @@ def run_three_ring_search(
     round_num: int = 1,
     skip_domains: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Önce havuzdan eşleşen firmaları getirir; ardından 4 motor + rehber + ihale sonuçlarını turlar halinde tarar."""
-    ust_kat = intel.get("ust_kategori") or ""
+    """Önce MKYS geçmiş alımları ve Ana Firma Havuzunu getirip eksikleri web'de tamamlar; ardından B2B 4 motor + rehber + ihale taraması yapar."""
+    ust_kat = (intel.get("ust_kategori") or "").split(",")[0].strip()
     query_specs, inferred = _build_round_queries(item_name, intel, round_num)
-    sector_tag = _standardize_sector(ust_kat, inferred) or "Kurumsal Tedarik"
+    sector_tag = ust_kat or _standardize_sector("", inferred) or "Kurumsal Tedarik"
+    relevance_profile = build_item_relevance_profile(item_name, intel)
 
     seen_domains: set[str] = set(skip_domains or ())
+    seen_firms: set[str] = set()
     results: list[dict[str, Any]] = []
 
     if round_num <= 1:
+        # 1) Öncelikli olarak SQLite MKYS geçmiş alımları ve Ana Firma Havuzu (+ eksik iletişim tamamlama)
+        mkys_leads = _resolve_mkys_priority_leads(
+            item_name=item_name,
+            sector_tag=sector_tag,
+            inferred=inferred,
+            synonyms=list(intel.get("es_anlamlilar") or []),
+            cache=cache,
+            progress_cb=progress_cb,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        for ml in mkys_leads:
+            mdom = str(ml.get("domain", "")).lower()
+            mfirm = tr_lower(str(ml.get("company_name", "")))
+            if mdom:
+                seen_domains.add(mdom)
+                if skip_domains is not None:
+                    skip_domains.add(mdom)
+            if mfirm:
+                seen_firms.add(mfirm)
+            results.append(ml)
+
+        # 2) firma_havuzu.xlsx içindeki eşleşen firmalar
         pool_hits = search_cache_pool(item_name, intel, cache)
         for ph in pool_hits:
             pdom = str(ph.get("domain", "")).lower()
-            if pdom and pdom in seen_domains:
+            pfirm = tr_lower(str(ph.get("company_name", "")))
+            if (pdom and pdom in seen_domains) or (pfirm and pfirm in seen_firms):
                 continue
             if pdom:
                 seen_domains.add(pdom)
+            if pfirm:
+                seen_firms.add(pfirm)
+            ph["sector"] = ph.get("sector") or sector_tag
             results.append(ph)
 
     if progress_cb:
-        progress_cb(f"{item_name} ({round_num}. Tur): {len(results)} havuz kaydı · {len(query_specs)} sorgu 4 motorda taranıyor...")
+        progress_cb(f"{item_name} ({round_num}. Tur): {len(results)} MKYS/havuz kaydı · {len(query_specs)} B2B sorgu 4 motorda taranıyor...")
 
     candidate_domains: dict[str, tuple[str, str]] = {}
     snippet_fallbacks: dict[str, dict[str, Any]] = {}
@@ -1182,25 +1661,29 @@ def run_three_ring_search(
             for res in qfut.result():
                 href = res.get("href", "")
                 dom = _root_domain(href)
-                if not dom or _is_excluded_domain(dom) or _is_social(dom):
+                if not dom:
                     continue
                 if _is_tender_result_domain(dom):
                     if href and href not in seen_special_urls:
                         seen_special_urls.add(href)
                         tender_hits.append(res)
                     continue
-                if _is_tender_domain(dom):
-                    continue
                 if _is_directory_domain(dom):
                     if href and href not in seen_special_urls:
                         seen_special_urls.add(href)
                         directory_hits.append(res)
                     continue
+                # 1) Ziyaret öncesi domain kara listesi (haber, ilan, blog, sosyal medya ve ticari olmayan TLD)
+                if _is_pre_fetch_blocked(dom):
+                    continue
                 if dom in seen_domains:
                     continue
 
-                candidate_domains.setdefault(dom, (sl, mt))
                 txt = f"{res.get('title', '')} {res.get('body', '')}"
+                if SPAM_BETTING_RE.search(txt):
+                    continue
+
+                candidate_domains.setdefault(dom, (sl, mt))
                 s_em = {m.lower() for m in EMAIL_RE.findall(txt)}
                 s_ph = _dedupe_phones(PHONE_RE.findall(txt))
                 fb = snippet_fallbacks.setdefault(dom, {"emails": set(), "phones": [], "title": res.get("title", ""), "url": href})
@@ -1209,7 +1692,7 @@ def run_three_ring_search(
 
     dir_web_cands, dir_direct_leads = _extract_directory_leads(directory_hits, item_name, sector_tag, inferred, timeout=DEFAULT_TIMEOUT)
     for edom, d_sl, d_mt, d_em, d_ph, d_hint in dir_web_cands:
-        if edom in seen_domains:
+        if edom in seen_domains or _is_pre_fetch_blocked(edom):
             continue
         candidate_domains.setdefault(edom, (d_sl, d_mt))
         fb = snippet_fallbacks.setdefault(edom, {"emails": set(), "phones": [], "title": d_hint, "url": f"https://{edom}"})
@@ -1228,7 +1711,7 @@ def run_three_ring_search(
 
     to_fetch: list[tuple[str, str, str]] = []
     for dom, (sl, mt) in candidate_domains.items():
-        if dom in seen_domains:
+        if dom in seen_domains or _is_pre_fetch_blocked(dom):
             continue
         if dom in cache and str(cache[dom].get("status", "")).startswith("Aktif") and (cache[dom].get("primary_email") or cache[dom].get("phone")):
             hit = dict(cache[dom])
@@ -1260,6 +1743,7 @@ def run_three_ring_search(
                         DEFAULT_TIMEOUT,
                         fb.get("emails"),
                         fb.get("phones"),
+                        relevance_profile,
                     )
                 ] = (dom, sl, mt)
             done = 0
@@ -1271,16 +1755,35 @@ def run_three_ring_search(
                 info = fut.result()
                 fb = snippet_fallbacks.get(dom)
                 if not info.get("status", "").startswith("Aktif"):
+                    # Spam, yabancı site, alakasız sektör veya ücretsiz mail elemesi ise kesin reddet
+                    if info.get("rejected"):
+                        continue
+                    # Yalnızca erişilemeyen ama arama özetinde kurumsal/TR sinyalli olanları kurtar
                     if fb and (fb["emails"] or fb["phones"]):
+                        snip_surface = f"{fb.get('title', '')} {fb.get('company_hint', '')}"
+                        if SPAM_BETTING_RE.search(snip_surface) or not _is_page_relevant(snip_surface, relevance_profile):
+                            continue
                         prim, ordered = rank_emails(fb["emails"], dom)
-                        if prim or fb["phones"]:
+                        has_corp_em = any(em.split("@")[-1] not in FREE_EMAIL_PROVIDERS for em in ordered)
+                        if (has_corp_em or fb["phones"]) and (prim or fb["phones"]):
                             info = {
-                                "company_name": (fb.get("company_hint") or fb["title"].split("|")[0].split("-")[0].strip() or dom)[:80],
-                                "domain": dom, "website": fb["url"] or f"https://{dom}",
-                                "primary_email": prim, "all_emails": ordered,
+                                "company_name": _extract_clean_company_name(
+                                    og_site_name="",
+                                    copyright_cands=[],
+                                    title=fb.get("title", ""),
+                                    final_dom=dom,
+                                    primary_email=prim,
+                                    company_hint=fb.get("company_hint", ""),
+                                ),
+                                "domain": dom,
+                                "website": fb["url"] or f"https://{dom}",
+                                "primary_email": prim,
+                                "all_emails": ordered,
                                 "phone": " / ".join(_dedupe_phones(fb["phones"])[:2]),
-                                "status": "Aktif (Arama Özetinden)", "last_year": "-",
-                                "notes": "Arama özetinden kurtarıldı", "product_groups": ", ".join(inferred),
+                                "status": "Aktif (Arama Özetinden)",
+                                "last_year": "-",
+                                "notes": "Arama özetinden kurtarıldı",
+                                "product_groups": ", ".join(inferred),
                             }
                         else:
                             continue

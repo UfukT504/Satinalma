@@ -108,6 +108,37 @@ def init_db(db_path: Path | None = None) -> None:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS mkys_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_name TEXT NOT NULL,
+                item_norm TEXT NOT NULL,
+                supplier_name TEXT NOT NULL,
+                supplier_norm TEXT NOT NULL,
+                sector TEXT NOT NULL DEFAULT '',
+                unit TEXT NOT NULL DEFAULT '',
+                quantity REAL,
+                unit_price REAL,
+                purchase_date TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_mkys_item_sup ON mkys_history(item_norm, supplier_norm);
+
+            CREATE TABLE IF NOT EXISTS master_suppliers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_name TEXT NOT NULL,
+                company_norm TEXT NOT NULL,
+                domain TEXT NOT NULL DEFAULT '',
+                website TEXT NOT NULL DEFAULT '',
+                primary_email TEXT NOT NULL DEFAULT '',
+                all_emails_json TEXT NOT NULL DEFAULT '[]',
+                phone TEXT NOT NULL DEFAULT '',
+                sector TEXT NOT NULL DEFAULT '',
+                items_sold_json TEXT NOT NULL DEFAULT '[]',
+                source TEXT NOT NULL DEFAULT '',
+                last_checked TEXT NOT NULL DEFAULT ''
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_master_company_norm ON master_suppliers(company_norm);
             """
         )
 
@@ -652,3 +683,296 @@ def evaluate_case_offers(
         "awarded_summary": sorted(awarded_by_firm.values(), key=lambda x: -x["total_amount"]),
         "grand_awarded_total": round(grand_awarded_total, 2),
     }
+
+
+# ---------------------------------------------------------------------------
+# MKYS Geçmiş Alım Kayıtları ve Sektör Etiketli Ana Firma Havuzu
+# ---------------------------------------------------------------------------
+
+def _fold_tr_text(text: str) -> str:
+    low = str(text or "").replace("İ", "i").replace("I", "ı").lower()
+    return low.translate(str.maketrans("çğıöşü", "cgiosu"))
+
+
+def _norm_key(text: str) -> str:
+    import re
+    return re.sub(r"\s+", " ", _fold_tr_text(text)).strip()
+
+
+def _extract_search_stems(text: str) -> set[str]:
+    import re
+    stop = {
+        "ve", "veya", "ile", "icin", "grubu", "tipi", "adet", "kutu", "set", "paket",
+        "malzeme", "malzemesi", "malzemeleri", "cihaz", "cihazi", "urun", "urunu",
+        "satis", "toptan", "tedarik", "firma", "hizmet", "hizmeti", "alimi", "genel",
+    }
+    stems: set[str] = set()
+    for w in re.split(r"[\s,/()\-&]+", _fold_tr_text(text)):
+        clean = re.sub(r"[^a-z0-9]", "", w)
+        if len(clean) < 3 or clean in stop:
+            continue
+        stems.add(clean)
+        for sfx in ("lari", "leri", "lar", "ler", "nin", "nun", "si", "su", "i", "u", "e", "a"):
+            if clean.endswith(sfx) and len(clean) - len(sfx) >= 4:
+                stems.add(clean[: -len(sfx)])
+                break
+    return stems
+
+
+def get_mkys_stats(db_path: Path | None = None) -> dict[str, int]:
+    with get_conn(db_path) as conn:
+        hc = conn.execute("SELECT COUNT(*) FROM mkys_history").fetchone()[0]
+        sc = conn.execute("SELECT COUNT(DISTINCT supplier_norm) FROM mkys_history").fetchone()[0]
+        mc = conn.execute("SELECT COUNT(*) FROM master_suppliers").fetchone()[0]
+        return {"history_count": int(hc), "unique_suppliers": int(sc), "master_count": int(mc)}
+
+
+def import_mkys_records(records: list[dict[str, Any]], db_path: Path | None = None) -> tuple[int, int]:
+    """MKYS geçmiş alım satırlarını mkys_history ve master_suppliers tablolarına kaydeder."""
+    now = _now_iso()
+    inserted = 0
+    with get_conn(db_path) as conn:
+        for r in records:
+            item_name = str(r.get("item_name") or "").strip()
+            supplier_name = str(r.get("supplier_name") or "").strip()
+            if not item_name or not supplier_name:
+                continue
+            item_norm = _norm_key(item_name)
+            sup_norm = _norm_key(supplier_name)
+            sector = str(r.get("sector") or "").strip()
+            unit = str(r.get("unit") or "").strip()
+            qty = r.get("quantity")
+            up = r.get("unit_price")
+            pdate = str(r.get("purchase_date") or "").strip()
+
+            cur = conn.execute(
+                """
+                INSERT INTO mkys_history(
+                    item_name, item_norm, supplier_name, supplier_norm,
+                    sector, unit, quantity, unit_price, purchase_date, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(item_norm, supplier_norm) DO UPDATE SET
+                    sector = CASE WHEN excluded.sector != '' THEN excluded.sector ELSE mkys_history.sector END,
+                    unit = CASE WHEN excluded.unit != '' THEN excluded.unit ELSE mkys_history.unit END,
+                    quantity = COALESCE(excluded.quantity, mkys_history.quantity),
+                    unit_price = COALESCE(excluded.unit_price, mkys_history.unit_price),
+                    purchase_date = CASE WHEN excluded.purchase_date != '' THEN excluded.purchase_date ELSE mkys_history.purchase_date END
+                """,
+                (item_name, item_norm, supplier_name, sup_norm, sector, unit, qty, up, pdate, now),
+            )
+            if cur.rowcount == 1:
+                inserted += 1
+
+            # Ana Firma Havuzu'na (master_suppliers) ekle veya kalem/sektör bilgisini birleştir
+            ex = conn.execute(
+                "SELECT id, sector, items_sold_json FROM master_suppliers WHERE company_norm = ?",
+                (sup_norm,),
+            ).fetchone()
+            if ex:
+                try:
+                    sold = json.loads(ex["items_sold_json"] or "[]")
+                except Exception:
+                    sold = []
+                if item_name not in sold:
+                    sold = (sold + [item_name])[:50]
+                old_sec = [s.strip() for s in str(ex["sector"] or "").split(",") if s.strip()]
+                if sector and sector.lower() not in {x.lower() for x in old_sec}:
+                    old_sec.append(sector)
+                conn.execute(
+                    "UPDATE master_suppliers SET sector=?, items_sold_json=? WHERE id=?",
+                    (", ".join(old_sec[:6]), json.dumps(sold, ensure_ascii=False), ex["id"]),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO master_suppliers(
+                        company_name, company_norm, domain, website, primary_email,
+                        all_emails_json, phone, sector, items_sold_json, source, last_checked
+                    ) VALUES (?, ?, '', '', '', '[]', '', ?, ?, 'MKYS Geçmiş Alım', '')
+                    """,
+                    (supplier_name, sup_norm, sector, json.dumps([item_name], ensure_ascii=False)),
+                )
+
+        total = int(conn.execute("SELECT COUNT(*) FROM mkys_history").fetchone()[0])
+    return inserted, total
+
+
+def upsert_master_supplier(
+    info: dict[str, Any],
+    sector: str = "",
+    item_name: str = "",
+    db_path: Path | None = None,
+) -> None:
+    """Bulunan veya iletişim bilgisi tamamlanan firmayı Ana Firma Havuzuna (master_suppliers) kaydeder."""
+    comp = str(info.get("company_name") or "").strip()
+    if not comp:
+        return
+    comp_norm = _norm_key(comp)
+    dom = str(info.get("domain") or "").strip().lower()
+    prim = str(info.get("primary_email") or "").strip().lower()
+    all_em = [str(e).strip().lower() for e in (info.get("all_emails") or []) if str(e).strip()]
+    if prim and prim not in all_em:
+        all_em.insert(0, prim)
+    phone = str(info.get("phone") or "").strip()
+    website = str(info.get("website") or "").strip()
+    sec_in = str(sector or info.get("sector") or "").strip()
+
+    with get_conn(db_path) as conn:
+        ex = None
+        if dom:
+            ex = conn.execute("SELECT * FROM master_suppliers WHERE LOWER(domain) = ?", (dom,)).fetchone()
+        if ex is None:
+            ex = conn.execute("SELECT * FROM master_suppliers WHERE company_norm = ?", (comp_norm,)).fetchone()
+
+        if ex:
+            try:
+                old_em = json.loads(ex["all_emails_json"] or "[]")
+            except Exception:
+                old_em = []
+            merged_em = list(dict.fromkeys(old_em + all_em))
+            try:
+                sold = json.loads(ex["items_sold_json"] or "[]")
+            except Exception:
+                sold = []
+            if item_name and item_name not in sold:
+                sold = (sold + [item_name])[:50]
+            old_sec = [s.strip() for s in str(ex["sector"] or "").split(",") if s.strip()]
+            for piece in [x.strip() for x in sec_in.split(",") if x.strip()]:
+                if piece.lower() not in {x.lower() for x in old_sec}:
+                    old_sec.append(piece)
+            conn.execute(
+                """
+                UPDATE master_suppliers
+                SET company_name=?, domain=?, website=?, primary_email=?, all_emails_json=?,
+                    phone=?, sector=?, items_sold_json=?, source=?, last_checked=?
+                WHERE id=?
+                """,
+                (
+                    comp if len(comp) >= 3 else ex["company_name"],
+                    dom or ex["domain"],
+                    website or ex["website"],
+                    prim or ex["primary_email"],
+                    json.dumps(merged_em, ensure_ascii=False),
+                    phone or ex["phone"],
+                    ", ".join(old_sec[:6]),
+                    json.dumps(sold, ensure_ascii=False),
+                    str(info.get("source") or ex["source"] or "Ana Havuz"),
+                    dt.date.today().isoformat(),
+                    ex["id"],
+                ),
+            )
+        else:
+            sold = [item_name] if item_name else []
+            conn.execute(
+                """
+                INSERT INTO master_suppliers(
+                    company_name, company_norm, domain, website, primary_email,
+                    all_emails_json, phone, sector, items_sold_json, source, last_checked
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    comp, comp_norm, dom, website, prim,
+                    json.dumps(all_em, ensure_ascii=False),
+                    phone, sec_in,
+                    json.dumps(sold, ensure_ascii=False),
+                    str(info.get("source") or "Ana Havuz"),
+                    dt.date.today().isoformat(),
+                ),
+            )
+
+
+def query_mkys_and_master_suppliers(
+    item_name: str,
+    sector: str = "",
+    synonyms: list[str] | None = None,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Önce MKYS geçmiş alımlarını ve Ana Firma Havuzunu kalem ve sektör bazında tarar."""
+    item_stems = _extract_search_stems(" ".join([item_name] + list(synonyms or [])))
+    sector_stems = _extract_search_stems(sector)
+    if not item_stems and not sector_stems:
+        return []
+
+    candidates: dict[str, dict[str, Any]] = {}
+    with get_conn(db_path) as conn:
+        master_rows = conn.execute("SELECT * FROM master_suppliers").fetchall()
+        for mr in master_rows:
+            d = dict(mr)
+            try:
+                sold = json.loads(d.get("items_sold_json") or "[]")
+            except Exception:
+                sold = []
+            try:
+                all_em = json.loads(d.get("all_emails_json") or "[]")
+            except Exception:
+                all_em = []
+            sold_text = " ".join(str(x) for x in sold)
+            sold_stems = _extract_search_stems(sold_text)
+            sec_stems = _extract_search_stems(d.get("sector", ""))
+
+            item_hits = len(item_stems & sold_stems)
+            sec_hits = len(sector_stems & (sec_stems | sold_stems))
+            score = item_hits * 4 + sec_hits * 2
+            if score <= 0:
+                continue
+
+            cnorm = d["company_norm"]
+            candidates[cnorm] = {
+                "score": score,
+                "item_hits": item_hits,
+                "company_name": d["company_name"],
+                "company_norm": cnorm,
+                "domain": d["domain"],
+                "website": d["website"],
+                "primary_email": d["primary_email"],
+                "all_emails": all_em,
+                "phone": d["phone"],
+                "sector": d["sector"] or sector,
+                "matched_items": sold[:5],
+                "source": "MKYS Geçmiş Alım" if "MKYS" in (d.get("source") or "") else "Ana Firma Havuzu (Önbellek)",
+                "match_type": "MKYS / Havuz Kalem Eşleşmesi" if item_hits > 0 else "Ana Havuz Sektör Eşleşmesi",
+                "needs_contact_lookup": not bool(d["primary_email"] or d["phone"]),
+            }
+
+        mkys_rows = conn.execute("SELECT * FROM mkys_history").fetchall()
+        for kr in mkys_rows:
+            knorm = kr["supplier_norm"]
+            row_stems = _extract_search_stems(kr["item_name"])
+            row_sec_stems = _extract_search_stems(kr["sector"])
+            item_hits = len(item_stems & row_stems)
+            sec_hits = len(sector_stems & (row_sec_stems | row_stems))
+            score = item_hits * 5 + sec_hits * 2
+            if score <= 0:
+                continue
+            if knorm in candidates:
+                candidates[knorm]["score"] = max(candidates[knorm]["score"], score)
+                if item_hits > 0:
+                    candidates[knorm]["match_type"] = "MKYS Geçmiş Alım"
+                    candidates[knorm]["source"] = (
+                        "MKYS Geçmiş Alım (Kayıtlı İletişim)"
+                        if not candidates[knorm]["needs_contact_lookup"]
+                        else "MKYS Geçmiş Alım"
+                    )
+            else:
+                candidates[knorm] = {
+                    "score": score,
+                    "item_hits": item_hits,
+                    "company_name": kr["supplier_name"],
+                    "company_norm": knorm,
+                    "domain": "",
+                    "website": "",
+                    "primary_email": "",
+                    "all_emails": [],
+                    "phone": "",
+                    "sector": kr["sector"] or sector,
+                    "matched_items": [kr["item_name"]],
+                    "source": "MKYS Geçmiş Alım",
+                    "match_type": "MKYS Geçmiş Alım" if item_hits > 0 else "MKYS Sektör Eşleşmesi",
+                    "needs_contact_lookup": True,
+                }
+
+    ranked = sorted(
+        candidates.values(),
+        key=lambda x: (-x["score"], 0 if not x["needs_contact_lookup"] else 1, x["company_name"]),
+    )
+    return ranked

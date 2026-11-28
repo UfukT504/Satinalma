@@ -381,3 +381,222 @@ def parse_offer_document(
         "prices": prices_by_item_id,
         "source": "Yerel Ayrıştırıcı",
     }
+
+
+# ---------------------------------------------------------------------------
+# Genel B2B Sektör ve Sorgu Üretici (Tüm Malzeme/Hizmet Sektörleri)
+# ---------------------------------------------------------------------------
+
+def build_b2b_sector_queries(item_name: str, sector_name: str, synonyms: list[str] | None = None) -> list[str]:
+    """Perakende yerine doğrudan toptancı, bölgesel (Balıkesir/İzmir/Bursa) ve kamu yüklenicisi B2B sorguları üretir."""
+    clean_item = re.sub(r"\([^)]*\)", " ", str(item_name or "")).strip()
+    clean_item = re.sub(r"\s+", " ", re.sub(r"\b(için|icin|grubu|tipi|adet|kutu)\b", " ", clean_item, flags=re.IGNORECASE)).strip() or item_name.strip()
+    kw = (synonyms[0].strip() if synonyms and synonyms[0].strip() else clean_item)
+    sec = (sector_name or "Kurumsal Tedarik").split(",")[0].strip()
+    return list(dict.fromkeys([
+        f'"{sec}" toptan satış "Ltd. Şti." OR "A.Ş." iletişim',
+        f'"{kw}" "yüklenici" OR "ihale sonucu" sözleşme',
+        f'"{sec}" kurumsal tedarik teklif e-posta',
+        f'"{sec}" Balıkesir OR İzmir OR Bursa toptan iletişim',
+        f'"{clean_item}" toptan satış tedarikçi iletişim "@"',
+    ]))
+
+
+def generate_sector_and_b2b_queries(
+    item_name: str,
+    api_key: str,
+    fallback_sector: str = "Kurumsal Tedarik",
+) -> dict[str, Any]:
+    """Gemini ile kalemin gerçek ticari sektörünü belirler ve toptancı/kamu tedarikçisi B2B sorguları üretir."""
+    fallback_queries = build_b2b_sector_queries(item_name, fallback_sector)
+    fallback_result = {
+        "aciklama": (
+            f"{item_name} kalemi kurum birimlerinin doğrudan temin ve piyasa araştırması kapsamında ihtiyaç duyduğu malzeme/hizmettir. "
+            "Türkiye genelinde ve çevre illerde faaliyet gösteren toptan tedarikçi ve yetkili firmalardan fiyat teklifi toplanır."
+        ),
+        "es_anlamlilar": [item_name],
+        "ust_kategori": fallback_sector,
+        "markalar": [],
+        "b2b_sorgular": fallback_queries,
+        "source": "Yerel Analiz",
+    }
+    if not api_key:
+        return fallback_result
+
+    prompt = (
+        f"Bir kamu hastanesi ve idari satın alma birimi için şu kalemi analiz et: '{item_name}'.\n"
+        "Sistem sadece medikal değil hırdavat, sıhhi tesisat, elektrik, kırtasiye, bilişim, mobilya, kimya, ilaç, teknik servis gibi TÜM sektörlerde çalışır.\n"
+        "Yanıtı YALNIZCA aşağıdaki anahtarlara sahip geçerli bir JSON nesnesi olarak ver:\n"
+        "- ust_kategori: Bu kalemin ait olduğu GERÇEK ticari sektör adı (ör. 'Lavabo Bataryası' -> 'Sıhhi Tesisat ve Yapı Malzemeleri', 'Toner' -> 'Büro Makineleri ve Sarf Malzemeleri', 'EKG Cihazı' -> 'Tıbbi Cihaz ve Medikal Sistemler').\n"
+        "- aciklama: Tam olarak 2 cümle; ürünün/hizmetin ne olduğunu ve hangi ticari sektörde tedarik edildiğini açıkla.\n"
+        "- es_anlamlilar: Türkiye piyasasında toptancıların kullandığı 3-5 adet eş anlamlı / teknik arama terimi.\n"
+        "- markalar: Türkiye'de bu alanda bilinen 2-4 üretici veya ana marka adı listesi (yoksa boş liste).\n"
+        "- b2b_sorgular: Perakende müşterileri değil DOĞRUDAN toptancıları, bölgesel (Balıkesir/İzmir/Bursa) tedarikçileri ve kamu ihale yüklenicilerini hedefleyen TAM OLARAK 5 B2B arama sorgusu üret:\n"
+        '  1) "{ust_kategori}" toptan satış "Ltd. Şti." OR "A.Ş." iletişim\n'
+        '  2) "{kalem_anahtar_kelime}" "yüklenici" OR "ihale sonucu" sözleşme\n'
+        '  3) "{ust_kategori}" kurumsal tedarik teklif e-posta\n'
+        '  4) "{ust_kategori}" Balıkesir OR İzmir OR Bursa toptan iletişim\n'
+        '  5) "{kalem_anahtar_kelime}" toptan satış tedarikçi iletişim "@"\n'
+    )
+    data = _call_gemini_json(api_key, [prompt])
+    if data and data.get("ust_kategori"):
+        sec = str(data.get("ust_kategori") or fallback_sector).strip()
+        syns = [str(x).strip() for x in (data.get("es_anlamlilar") or []) if str(x).strip()][:5]
+        raw_b2b = [str(x).strip() for x in (data.get("b2b_sorgular") or []) if str(x).strip()]
+        structured = build_b2b_sector_queries(item_name, sec, syns)
+        merged_b2b = list(dict.fromkeys(raw_b2b[:3] + structured))[:6]
+        return {
+            "aciklama": str(data.get("aciklama") or fallback_result["aciklama"]).strip(),
+            "es_anlamlilar": syns or [item_name],
+            "ust_kategori": sec,
+            "markalar": [str(x).strip() for x in (data.get("markalar") or []) if str(x).strip()][:4],
+            "b2b_sorgular": merged_b2b,
+            "source": f"{data.get('_model', 'gemini-flash')}",
+            "schema_v2": True,
+        }
+    return fallback_result
+
+
+# ---------------------------------------------------------------------------
+# MKYS Geçmiş Alım Excel Ayrıştırıcı
+# ---------------------------------------------------------------------------
+
+_MKYS_ITEM_HINTS = (
+    "malzeme/hizmet", "malzeme tanımı", "malzeme tanimi", "malzeme adı", "malzeme adi",
+    "hizmet adı", "hizmet adi", "taşınır adı", "tasinir adi", "kalem adı", "kalem adi",
+    "malzeme cinsi", "ürün adı", "malzeme", "hizmet", "kalem", "cinsi",
+)
+_MKYS_FIRM_HINTS = (
+    "tedarikçi firma", "tedarikci firma", "firma ünvanı", "firma unvanı", "firma unvani",
+    "tedarikçi ünvanı", "tedarikci unvani", "firma adı", "firma adi", "satıcı firma",
+    "tedarikçi", "tedarikci", "yüklenici", "yuklenici", "satıcı", "firma", "ünvan", "unvan",
+)
+_MKYS_PUBLIC_RE = re.compile(
+    r"\b(DEVLET MALZEME OFİSİ|DMO|HASTANESİ|İL SAĞLIK|BAKANLIĞI|BELEDİYESİ|ÜNİVERSİTESİ|SAYMANLIĞI)\b",
+    re.IGNORECASE,
+)
+
+
+def _read_tabular_rows(filename: str, raw_bytes: bytes) -> list[list[Any]]:
+    ext = Path(filename).suffix.lower()
+    if ext in (".xlsx", ".xlsm"):
+        wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=True, read_only=True)
+        rows = [list(r) for r in wb.active.iter_rows(values_only=True)]
+        wb.close()
+        return rows
+    if ext == ".csv":
+        text = raw_bytes.decode("utf-8-sig", errors="replace")
+        lines = text.splitlines()
+        delim = ";" if "\n".join(lines[:20]).count(";") > "\n".join(lines[:20]).count(",") else ","
+        return list(csv.reader(lines, delimiter=delim))
+    return []
+
+
+def parse_mkys_excel(
+    filename: str,
+    raw_bytes: bytes,
+    exclude_public: bool = True,
+    item_col_override: int | None = None,
+    firm_col_override: int | None = None,
+) -> dict[str, Any]:
+    """MKYS İş Zekası Excel/CSV dosyasından Malzeme/Hizmet Adı ve Tedarikçi Firma Ünvanı kayıtlarını çıkarır."""
+    rows = _read_tabular_rows(filename, raw_bytes)
+    non_empty = [r for r in rows if any(str(c or "").strip() for c in r)]
+    if not non_empty:
+        return {"error": "Dosyada okunabilir tablo satırı bulunamadı.", "records": [], "headers": []}
+
+    best_idx = 0
+    best_score = -1
+    best_item_col: int | None = None
+    best_firm_col: int | None = None
+
+    for i, r in enumerate(non_empty[:40]):
+        if sum(1 for c in r if str(c or "").strip()) < 2:
+            continue
+        lows = [tr_lower(str(c or "").strip()) for c in r]
+        it_c = None
+        fm_c = None
+        for h in _MKYS_ITEM_HINTS:
+            for idx, col in enumerate(lows):
+                if h in col and not any(ex in col for ex in ("birim adı", "birim adi", "hastane", "kurum", "bölüm")):
+                    it_c = idx
+                    break
+            if it_c is not None:
+                break
+        for h in _MKYS_FIRM_HINTS:
+            for idx, col in enumerate(lows):
+                if idx == it_c:
+                    continue
+                if h in col:
+                    fm_c = idx
+                    break
+            if fm_c is not None:
+                break
+        sc = (3 if it_c is not None else 0) + (3 if fm_c is not None else 0)
+        if sc > best_score:
+            best_score = sc
+            best_idx = i
+            best_item_col = it_c
+            best_firm_col = fm_c
+
+    headers = [str(c or f"Sütun {idx + 1}").strip() or f"Sütun {idx + 1}" for idx, c in enumerate(non_empty[best_idx])]
+    it_col = item_col_override if item_col_override is not None else best_item_col
+    fm_col = firm_col_override if firm_col_override is not None else best_firm_col
+
+    if it_col is None or fm_col is None:
+        return {
+            "headers": headers,
+            "detected_item_col": it_col,
+            "detected_firm_col": fm_col,
+            "records": [],
+            "skipped_public": 0,
+            "total_rows": max(0, len(non_empty) - best_idx - 1),
+            "needs_mapping": True,
+        }
+
+    # Opsiyonel sütunlar: Birim, Miktar, Birim Fiyat, Tarih, Sektör
+    low_headers = [tr_lower(h) for h in headers]
+    unit_col = next((i for i, h in enumerate(low_headers) if "birim" in h and "fiyat" not in h and "adı" not in h), None)
+    qty_col = next((i for i, h in enumerate(low_headers) if "miktar" in h), None)
+    price_col = next((i for i, h in enumerate(low_headers) if "birim fiyat" in h or "fiyat" in h), None)
+    date_col = next((i for i, h in enumerate(low_headers) if "tarih" in h), None)
+    sec_col = next((i for i, h in enumerate(low_headers) if "sektör" in h or "sektor" in h or "grup" in h), None)
+
+    records: list[dict[str, Any]] = []
+    skipped_public = 0
+    seen_pairs: set[tuple[str, str]] = set()
+
+    for r in non_empty[best_idx + 1:]:
+        it_val = str(r[it_col] or "").strip() if it_col < len(r) else ""
+        fm_val = str(r[fm_col] or "").strip() if fm_col < len(r) else ""
+        if not it_val or not fm_val or len(it_val) < 2 or len(fm_val) < 2:
+            continue
+        if BOILERPLATE_LINE_RE.match(it_val) or BOILERPLATE_LINE_RE.match(fm_val):
+            continue
+        if exclude_public and _MKYS_PUBLIC_RE.search(fm_val.upper()):
+            skipped_public += 1
+            continue
+        pair_key = (tr_lower(it_val), tr_lower(fm_val))
+        if pair_key in seen_pairs:
+            continue
+        seen_pairs.add(pair_key)
+
+        records.append({
+            "item_name": it_val,
+            "supplier_name": fm_val,
+            "sector": str(r[sec_col] or "").strip() if (sec_col is not None and sec_col < len(r)) else "",
+            "unit": str(r[unit_col] or "").strip() if (unit_col is not None and unit_col < len(r)) else "",
+            "quantity": parse_tr_number(r[qty_col], None) if (qty_col is not None and qty_col < len(r)) else None,
+            "unit_price": parse_tr_number(r[price_col], None) if (price_col is not None and price_col < len(r)) else None,
+            "purchase_date": str(r[date_col] or "").strip() if (date_col is not None and date_col < len(r)) else "",
+        })
+
+    return {
+        "headers": headers,
+        "detected_item_col": it_col,
+        "detected_firm_col": fm_col,
+        "records": records,
+        "skipped_public": skipped_public,
+        "total_rows": max(0, len(non_empty) - best_idx - 1),
+        "needs_mapping": False,
+    }

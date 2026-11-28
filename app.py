@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from ai_parser import parse_demand_form, parse_offer_document, parse_tr_number
+from ai_parser import parse_demand_form, parse_mkys_excel, parse_offer_document, parse_tr_number
 from db import (
     add_case_suppliers,
     create_case,
@@ -24,6 +24,8 @@ from db import (
     get_case_items,
     get_case_offers,
     get_case_suppliers,
+    get_mkys_stats,
+    import_mkys_records,
     init_db,
     list_cases,
     save_default_commission,
@@ -49,6 +51,7 @@ from search_engine import (
     collect_bcc_emails,
     dataframe_to_utf8_bom_csv,
     get_secret,
+    infer_product_groups,
     load_ai_cache,
     load_cache,
     run_three_ring_search,
@@ -539,13 +542,84 @@ def render_step2(
     gemini_key: str,
 ) -> None:
     case_id = int(case_data["id"])
+    mkys_stats = get_mkys_stats()
+
+    # Genel MKYS Geçmiş Alım Aktarımı (Adım 2 Üst Bölüm)
+    with st.expander(
+        f"📥 MKYS Geçmiş Alım Excel'i Yükle  ·  (Kayıtlı Geçmiş: {mkys_stats['history_count']} alım · {mkys_stats['unique_suppliers']} firma · Ana Havuz: {mkys_stats['master_count']} firma)",
+        expanded=False,
+    ):
+        st.caption(
+            "MKYS İş Zekası'ndan aldığınız genel malzeme/hizmet alım listesini (.xlsx, .xlsm, .csv) yükleyin. "
+            "Sistem 'Malzeme/Hizmet Adı' ve 'Tedarikçi Firma Ünvanı' sütunlarını eşleştirip veritabanına kaydeder; "
+            "sonraki aramalarda bu firmalar öncelikli getirilerek iletişim bilgileri web'den tamamlanır."
+        )
+        mc1, mc2 = st.columns([2.0, 1.0])
+        with mc1:
+            mkys_file = st.file_uploader(
+                "MKYS İş Zekası Excel / CSV Dosyası",
+                type=["xlsx", "xlsm", "csv"],
+                key=f"mkys_uploader_{case_id}",
+                label_visibility="collapsed",
+            )
+        with mc2:
+            exclude_pub = st.checkbox("Kamu kurumlarını (DMO vb.) hariç tut", value=True, key=f"mkys_ex_pub_{case_id}")
+
+        if mkys_file is not None:
+            raw_mkys = mkys_file.getvalue()
+            preview = parse_mkys_excel(mkys_file.name, raw_mkys, exclude_public=exclude_pub)
+            if preview.get("error"):
+                st.error(preview["error"])
+            else:
+                hdrs = preview.get("headers") or []
+                det_it = preview.get("detected_item_col")
+                det_fm = preview.get("detected_firm_col")
+                if hdrs:
+                    sc1, sc2 = st.columns(2)
+                    with sc1:
+                        sel_it_col = st.selectbox(
+                            "Malzeme / Hizmet Adı Sütunu",
+                            options=list(range(len(hdrs))),
+                            index=det_it if (det_it is not None and det_it < len(hdrs)) else 0,
+                            format_func=lambda i: hdrs[i],
+                            key=f"mkys_it_col_{case_id}_{mkys_file.name}",
+                        )
+                    with sc2:
+                        default_fm = det_fm if (det_fm is not None and det_fm < len(hdrs)) else (1 if len(hdrs) > 1 else 0)
+                        sel_fm_col = st.selectbox(
+                            "Tedarikçi Firma Ünvanı Sütunu",
+                            options=list(range(len(hdrs))),
+                            index=default_fm,
+                            format_func=lambda i: hdrs[i],
+                            key=f"mkys_fm_col_{case_id}_{mkys_file.name}",
+                        )
+                    final_parsed = parse_mkys_excel(
+                        mkys_file.name,
+                        raw_mkys,
+                        exclude_public=exclude_pub,
+                        item_col_override=sel_it_col,
+                        firm_col_override=sel_fm_col,
+                    )
+                    recs = final_parsed.get("records") or []
+                    st.caption(
+                        f"Eşleşen benzersiz alım kaydı: **{len(recs)}** "
+                        f"(hariç tutulan kamu kurumu: {final_parsed.get('skipped_public', 0)})"
+                    )
+                    if st.button("💾 MKYS Geçmiş Alımlarını Ana Havuza Kaydet", type="primary", width="stretch", disabled=not recs, key=f"btn_import_mkys_{case_id}"):
+                        for r in recs:
+                            if not r.get("sector"):
+                                r["sector"] = ", ".join(infer_product_groups(r["item_name"])) or "Genel Tedarik (MKYS)"
+                        ins, tot = import_mkys_records(recs)
+                        st.success(f"✅ {ins} yeni MKYS kaydı veritabanına eklendi (Toplam MKYS havuzu: {tot} kayıt).")
+                        st.rerun()
+
     if not items:
         st.info("Tedarikçi aramadan önce **1. İstem Formu & Kalemler** adımından en az bir kalem ekleyin.")
         return
 
     st.markdown(
-        '<div class="clean-card"><div class="card-title">Çoklu Motor Tedarikçi Arama (Yandex · Bing · Yahoo · DDG · İhale · Rehber)</div>'
-        '<div class="card-sub">Sonuçlar otomatik olarak bu alım dosyasına kaydedilir ve ortak firma havuzuna işlenir.</div>',
+        '<div class="clean-card"><div class="card-title">Çoklu Motor B2B Tedarikçi Arama (MKYS/Havuz Öncelikli · Yandex · Bing · Yahoo · DDG · İhale)</div>'
+        '<div class="card-sub">Önce MKYS geçmiş alımları ve Ana Firma Havuzundaki eşleşmeler getirilir; ardından Gemini sektör tespiti ve B2B sorgularıyla web taranır.</div>',
         unsafe_allow_html=True,
     )
 
@@ -605,7 +679,7 @@ def render_step2(
         for idx, it_name in enumerate(selected_item_names, start=1):
             it_obj = item_by_name.get(it_name, {})
             existing_intel = it_obj.get("ai_intel") or {}
-            if existing_intel.get("aciklama") and existing_intel.get("b2b_sorgular"):
+            if existing_intel.get("aciklama") and existing_intel.get("b2b_sorgular") and (existing_intel.get("schema_v2") or not use_gemini):
                 intel = existing_intel
             else:
                 status_slot.info(f"⏳ [{idx}/{len(selected_item_names)}] **{it_name}** analiz ediliyor...")
@@ -666,9 +740,24 @@ def render_step2(
         unsafe_allow_html=True,
     )
 
-    tb1, tb2, tb3, tb4 = st.columns([1.4, 0.9, 0.9, 1.1])
+    all_sectors = sorted({
+        sec.strip()
+        for s in suppliers
+        for sec in str(s.get("sector") or "").split(",")
+        if sec.strip()
+    })
+    tb1, tb1b, tb2, tb3, tb4 = st.columns([1.2, 1.15, 0.85, 0.85, 1.0])
     with tb1:
-        filter_q = st.text_input("Firma veya kalem ara...", key=f"sup_filter_{case_id}", label_visibility="collapsed", placeholder="🔍 Firma, e-posta veya kalem filtrele...")
+        filter_q = st.text_input("Firma veya kalem ara...", key=f"sup_filter_{case_id}", label_visibility="collapsed", placeholder="🔍 Firma, e-posta veya kalem...")
+    with tb1b:
+        sector_filter = st.multiselect(
+            "Sektör Filtresi",
+            options=all_sectors,
+            default=[],
+            key=f"sup_sector_filter_{case_id}",
+            label_visibility="collapsed",
+            placeholder="🏷️ Sektöre göre filtrele...",
+        )
     with tb2:
         if st.button("☑️ E-postalıları Seç", width="stretch", key=f"sel_all_mail_{case_id}"):
             edits = [{**s, "selected": bool(s.get("primary_email"))} for s in suppliers]
@@ -687,6 +776,7 @@ def render_step2(
                 m_phone = st.text_input("Telefon")
                 m_web = st.text_input("Web Sitesi")
                 m_item = st.selectbox("İlgili Kalem", options=item_names)
+                m_sec = st.text_input("Sektör", value=(item_by_name.get(m_item, {}).get("ai_intel") or {}).get("ust_kategori", ""))
                 if st.form_submit_button("Firmayı Dosyaya Ekle", type="primary", width="stretch"):
                     if m_comp.strip():
                         add_case_suppliers(case_id, [{
@@ -696,6 +786,7 @@ def render_step2(
                             "all_emails": [m_mail.strip().lower()] if m_mail.strip() else [],
                             "phone": m_phone.strip(),
                             "website": m_web.strip(),
+                            "sector": m_sec.strip() or ", ".join(infer_product_groups(m_item)) or "Kurumsal Tedarik",
                             "source": "Manuel Giriş",
                             "match_type": "Manuel",
                             "status": "Aktif",
@@ -709,8 +800,14 @@ def render_step2(
     if filter_q.strip():
         fq = filter_q.strip().lower()
         filtered = [
-            s for s in suppliers
-            if fq in s["company_name"].lower() or fq in s["primary_email"].lower() or fq in s["item_name"].lower()
+            s for s in filtered
+            if fq in s["company_name"].lower() or fq in s["primary_email"].lower() or fq in s["item_name"].lower() or fq in s["sector"].lower()
+        ]
+    if sector_filter:
+        sel_secs = {x.lower() for x in sector_filter}
+        filtered = [
+            s for s in filtered
+            if any(part.strip().lower() in sel_secs for part in str(s.get("sector") or "").split(",") if part.strip())
         ]
 
     if not filtered:
@@ -749,7 +846,7 @@ def render_step2(
                 "Sektör": st.column_config.TextColumn("Sektör", width="small"),
                 "Kaynak": st.column_config.TextColumn("Kaynak", width="small", disabled=True),
             },
-            key=f"sup_editor_{case_id}_{len(suppliers)}_{hash(filter_q)}",
+            key=f"sup_editor_{case_id}_{len(suppliers)}_{hash(filter_q)}_{hash(tuple(sector_filter))}",
         )
 
         # Tek tıkla silme veya düzenleme senkronizasyonu
