@@ -13,7 +13,25 @@ from typing import Any
 
 import openpyxl
 
-from search_engine import BOILERPLATE_LINE_RE, detect_procurement_type, tr_lower
+BOILERPLATE_LINE_RE = re.compile(
+    r"^(t\.?\s*c\.?|sağlık bakanlığı|devlet hastanesi|başhekim|satın alma|talep formu|"
+    r"tarih|sayı|konu|imza|onay|adı soyadı|unvan|birim sorumlusu|not\s*:|açıklama\s*:)",
+    re.IGNORECASE,
+)
+_SERVICE_KEYWORDS = (
+    "bakım", "bakim", "onarım", "onarim", "kalibrasyon", "servis", "kiralama",
+    "hizmet", "danışmanlık", "egitim", "eğitim", "temizlik", "güvenlik",
+    "nakliye", "taşıma", "montaj", "periyodik", "ölçüm", "analiz", "yazılım",
+)
+
+
+def tr_lower(text: str) -> str:
+    return str(text or "").replace("İ", "i").replace("I", "ı").lower()
+
+
+def detect_procurement_type(items: list[str]) -> str:
+    joined = tr_lower(" ".join(items))
+    return "Hizmet" if any(kw in joined for kw in _SERVICE_KEYWORDS) else "Malzeme"
 
 GEMINI_DOC_MODELS = (
     "gemini-3.5-flash",
