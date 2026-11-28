@@ -7,6 +7,7 @@ import html as html_lib
 import importlib
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -1414,33 +1415,37 @@ def render_step4(
 # Ana Uygulama Akışı
 # ---------------------------------------------------------------------------
 
-@st.cache_resource
-def auto_sanitize_pool() -> dict[str, int]:
-    """Uygulama açılışında bir kez çalışarak ai_verified = 0 kayıtları arka planda sessizce Gemini ile denetler."""
+@st.cache_resource(show_spinner=False)
+def auto_sanitize_pool() -> dict[str, Any]:
+    """Uygulama açılışında bir kez arka plan iş parçacığında çalışarak ai_verified = 0 kayıtları sessizce denetler; arayüzü bloklamaz."""
     init_db()
-    try:
-        seed_unverified_from_xlsx(load_cache(CACHE_XLSX))
-    except Exception:
-        pass
     gemini_key = get_secret("GEMINI_API_KEY", "")
-    if not gemini_key:
-        return {"deleted": 0, "verified": 0}
 
-    total_deleted = 0
-    total_verified = 0
-    for _ in range(5):
-        unv = get_unverified_pool_records(limit=60)
-        if not unv["pool"] and not unv["mkys"]:
-            break
-        san = sanitize_pool_batch_with_ai(unv["pool"], unv["mkys"], gemini_key, batch_size=20)
-        if not san["pool_decisions"] and not san["mkys_decisions"]:
-            break
-        res = apply_pool_sanitization_results(san["pool_decisions"], san["mkys_decisions"])
-        total_deleted += res["deleted"]
-        total_verified += res["verified"]
-        if san.get("error"):
-            break
-    return {"deleted": total_deleted, "verified": total_verified}
+    def _bg_worker() -> None:
+        try:
+            seed_unverified_from_xlsx(load_cache(CACHE_XLSX))
+        except Exception:
+            pass
+        if not gemini_key:
+            return
+        for _ in range(15):
+            try:
+                unv = get_unverified_pool_records(limit=40)
+                if not unv["pool"] and not unv["mkys"]:
+                    break
+                san = sanitize_pool_batch_with_ai(unv["pool"], unv["mkys"], gemini_key, batch_size=20)
+                if not san["pool_decisions"] and not san["mkys_decisions"]:
+                    break
+                apply_pool_sanitization_results(san["pool_decisions"], san["mkys_decisions"])
+                if san.get("error"):
+                    break
+                time.sleep(0.25)
+            except Exception:
+                break
+
+    t = threading.Thread(target=_bg_worker, name="auto_sanitize_pool", daemon=True)
+    t.start()
+    return {"started": True}
 
 
 def main() -> None:

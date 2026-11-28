@@ -912,6 +912,7 @@ def inspect_company_website(
         company_hint=company_hint,
     )
 
+    excerpt_raw = re.sub(r"\s+", " ", f"{home['h1']} {home['meta_desc']} {home['main_text'][:700]}").strip()
     return {
         "company_name": clean_company,
         "domain": final_dom,
@@ -923,6 +924,9 @@ def inspect_company_website(
         "last_year": max_year or "-",
         "notes": "" if prim else "Web form üzerinden iletişim",
         "product_groups": ", ".join(sorted(groups)),
+        "site_title": home["title"][:160],
+        "site_meta": home["meta_desc"][:220],
+        "site_excerpt": excerpt_raw[:700],
     }
 
 
@@ -1139,10 +1143,16 @@ def _merge_firm_into_cache(cache: dict[str, dict[str, Any]], info: dict[str, Any
         "notes": info.get("notes") or existing.get("notes") or "",
         "product_groups": merged_groups,
         "sector": merged_sector,
+        "ai_verified": int(info.get("ai_verified", 1)),
     }
     try:
         import db
-        db.upsert_master_supplier(cache[dom], sector=sector_tag, item_name=str(info.get("item") or ""))
+        db.upsert_master_supplier(
+            cache[dom],
+            sector=str(info.get("sector") or sector_tag),
+            item_name=str(info.get("item") or ""),
+            ai_verified=int(info.get("ai_verified", 1)),
+        )
     except Exception:
         pass
 
@@ -1570,13 +1580,14 @@ def _resolve_mkys_priority_leads(
             "match_type": m.get("match_type") or "MKYS Geçmiş Alım",
             "sector": sector_tag or m.get("sector") or "Kurumsal Tedarik",
             "product_groups": _standardize_sector(m.get("sector", ""), inferred),
+            "ai_verified": 1,
         })
         if info.get("domain"):
             _merge_firm_into_cache(cache, info, info["sector"], inferred)
         else:
             try:
                 import db
-                db.upsert_master_supplier(info, sector=info["sector"], item_name=item_name)
+                db.upsert_master_supplier(info, sector=info["sector"], item_name=item_name, ai_verified=1)
             except Exception:
                 pass
         return info
@@ -1597,8 +1608,11 @@ def run_three_ring_search(
     max_sites: int = DEFAULT_MAX_SITES,
     round_num: int = 1,
     skip_domains: set[str] | None = None,
+    api_key: str | None = None,
+    stats_out: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Önce MKYS geçmiş alımları ve Ana Firma Havuzunu getirip eksikleri web'de tamamlar; ardından B2B 4 motor + rehber + ihale taraması yapar."""
+    """Önce ai_verified=1 olan havuz/MKYS firmalarını getirir; web adaylarını kayıt öncesi 20'şerli Gemini AI denetiminden (Fail-Closed) geçirir."""
+    effective_key = get_secret("GEMINI_API_KEY", "") if api_key is None else api_key
     ust_kat = (intel.get("ust_kategori") or "").split(",")[0].strip()
     query_specs, inferred = _build_round_queries(item_name, intel, round_num)
     sector_tag = ust_kat or _standardize_sector("", inferred) or "Kurumsal Tedarik"
@@ -1609,7 +1623,7 @@ def run_three_ring_search(
     results: list[dict[str, Any]] = []
 
     if round_num <= 1:
-        # 1) Öncelikli olarak SQLite MKYS geçmiş alımları ve Ana Firma Havuzu (+ eksik iletişim tamamlama)
+        # Yalnızca ai_verified = 1 olan ana_firma_havuzu ve mkys_gecmis_alimlar kayıtlarını guven_puani sırasıyla getir
         mkys_leads = _resolve_mkys_priority_leads(
             item_name=item_name,
             sector_tag=sector_tag,
@@ -1630,22 +1644,8 @@ def run_three_ring_search(
                 seen_firms.add(mfirm)
             results.append(ml)
 
-        # 2) firma_havuzu.xlsx içindeki eşleşen firmalar
-        pool_hits = search_cache_pool(item_name, intel, cache)
-        for ph in pool_hits:
-            pdom = str(ph.get("domain", "")).lower()
-            pfirm = tr_lower(str(ph.get("company_name", "")))
-            if (pdom and pdom in seen_domains) or (pfirm and pfirm in seen_firms):
-                continue
-            if pdom:
-                seen_domains.add(pdom)
-            if pfirm:
-                seen_firms.add(pfirm)
-            ph["sector"] = ph.get("sector") or sector_tag
-            results.append(ph)
-
     if progress_cb:
-        progress_cb(f"{item_name} ({round_num}. Tur): {len(results)} MKYS/havuz kaydı · {len(query_specs)} B2B sorgu 4 motorda taranıyor...")
+        progress_cb(f"{item_name} ({round_num}. Tur): {len(results)} doğrulanmış havuz kaydı · {len(query_specs)} B2B sorgu taranıyor...")
 
     candidate_domains: dict[str, tuple[str, str]] = {}
     snippet_fallbacks: dict[str, dict[str, Any]] = {}
@@ -1673,7 +1673,6 @@ def run_three_ring_search(
                         seen_special_urls.add(href)
                         directory_hits.append(res)
                     continue
-                # 1) Ziyaret öncesi domain kara listesi (haber, ilan, blog, sosyal medya ve ticari olmayan TLD)
                 if _is_pre_fetch_blocked(dom):
                     continue
                 if dom in seen_domains:
@@ -1686,47 +1685,45 @@ def run_three_ring_search(
                 candidate_domains.setdefault(dom, (sl, mt))
                 s_em = {m.lower() for m in EMAIL_RE.findall(txt)}
                 s_ph = _dedupe_phones(PHONE_RE.findall(txt))
-                fb = snippet_fallbacks.setdefault(dom, {"emails": set(), "phones": [], "title": res.get("title", ""), "url": href})
+                fb = snippet_fallbacks.setdefault(dom, {"emails": set(), "phones": [], "title": res.get("title", ""), "body": res.get("body", ""), "url": href})
                 fb["emails"].update(s_em)
                 fb["phones"] = _dedupe_phones(fb["phones"] + s_ph)
+
+    # Bellekteki AI Tampon Bölgesi (henüz veritabanına yazılmamış adaylar)
+    pending_verification: list[dict[str, Any]] = []
+    pending_domains: set[str] = set()
+    inspected_count = 0
+    pre_rejected_count = 0
 
     dir_web_cands, dir_direct_leads = _extract_directory_leads(directory_hits, item_name, sector_tag, inferred, timeout=DEFAULT_TIMEOUT)
     for edom, d_sl, d_mt, d_em, d_ph, d_hint in dir_web_cands:
         if edom in seen_domains or _is_pre_fetch_blocked(edom):
             continue
         candidate_domains.setdefault(edom, (d_sl, d_mt))
-        fb = snippet_fallbacks.setdefault(edom, {"emails": set(), "phones": [], "title": d_hint, "url": f"https://{edom}"})
+        fb = snippet_fallbacks.setdefault(edom, {"emails": set(), "phones": [], "title": d_hint, "body": "", "url": f"https://{edom}"})
         fb["emails"].update(d_em)
         fb["phones"] = _dedupe_phones(fb["phones"] + d_ph)
         fb["company_hint"] = d_hint
 
     for lead in dir_direct_leads:
-        ldom = lead["domain"]
-        if ldom not in seen_domains:
-            seen_domains.add(ldom)
-            if skip_domains is not None:
-                skip_domains.add(ldom)
-            _merge_firm_into_cache(cache, lead, sector_tag, inferred)
-            results.append(lead)
+        ldom = str(lead.get("domain") or "").lower()
+        if ldom and ldom not in seen_domains and ldom not in pending_domains:
+            pending_domains.add(ldom)
+            inspected_count += 1
+            lead.setdefault("site_title", lead.get("company_name", ""))
+            lead.setdefault("site_excerpt", f"{lead.get('company_name', '')} {lead.get('notes', '')}")
+            pending_verification.append(lead)
 
     to_fetch: list[tuple[str, str, str]] = []
     for dom, (sl, mt) in candidate_domains.items():
         if dom in seen_domains or _is_pre_fetch_blocked(dom):
             continue
-        if dom in cache and str(cache[dom].get("status", "")).startswith("Aktif") and (cache[dom].get("primary_email") or cache[dom].get("phone")):
-            hit = dict(cache[dom])
-            _merge_firm_into_cache(cache, hit, sector_tag, inferred)
-            hit.update({"item": item_name, "source": f"{sl} (Önbellek)", "match_type": mt})
-            seen_domains.add(dom)
-            if skip_domains is not None:
-                skip_domains.add(dom)
-            results.append(hit)
-        else:
-            to_fetch.append((dom, sl, mt))
+        to_fetch.append((dom, sl, mt))
 
     to_fetch = to_fetch[:max_sites]
     if to_fetch:
         total = len(to_fetch)
+        inspected_count += total
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
             futs = {}
             for dom, sl, mt in to_fetch:
@@ -1751,17 +1748,17 @@ def run_three_ring_search(
                 done += 1
                 dom, sl, mt = futs[fut]
                 if progress_cb:
-                    progress_cb(f"{item_name} ({round_num}. Tur): {done}/{total} yeni site tarandı ({dom})")
+                    progress_cb(f"{item_name} ({round_num}. Tur): {done}/{total} site tarandı ({dom})")
                 info = fut.result()
                 fb = snippet_fallbacks.get(dom)
                 if not info.get("status", "").startswith("Aktif"):
-                    # Spam, yabancı site, alakasız sektör veya ücretsiz mail elemesi ise kesin reddet
                     if info.get("rejected"):
+                        pre_rejected_count += 1
                         continue
-                    # Yalnızca erişilemeyen ama arama özetinde kurumsal/TR sinyalli olanları kurtar
                     if fb and (fb["emails"] or fb["phones"]):
-                        snip_surface = f"{fb.get('title', '')} {fb.get('company_hint', '')}"
+                        snip_surface = f"{fb.get('title', '')} {fb.get('company_hint', '')} {fb.get('body', '')}"
                         if SPAM_BETTING_RE.search(snip_surface) or not _is_page_relevant(snip_surface, relevance_profile):
+                            pre_rejected_count += 1
                             continue
                         prim, ordered = rank_emails(fb["emails"], dom)
                         has_corp_em = any(em.split("@")[-1] not in FREE_EMAIL_PROVIDERS for em in ordered)
@@ -1784,31 +1781,72 @@ def run_three_ring_search(
                                 "last_year": "-",
                                 "notes": "Arama özetinden kurtarıldı",
                                 "product_groups": ", ".join(inferred),
+                                "site_title": fb.get("title", "")[:160],
+                                "site_meta": "",
+                                "site_excerpt": snip_surface[:700],
                             }
                         else:
+                            pre_rejected_count += 1
                             continue
                     else:
                         continue
                 if not info.get("primary_email") and not info.get("phone"):
+                    pre_rejected_count += 1
                     continue
                 info.update({
                     "item": item_name, "source": sl, "match_type": mt,
                     "sector": sector_tag, "last_checked": dt.date.today().isoformat(),
                 })
-                _merge_firm_into_cache(cache, info, sector_tag, inferred)
-                results.append(info)
+                if dom not in pending_domains:
+                    pending_domains.add(dom)
+                    pending_verification.append(info)
 
     tender_contractors = _resolve_tender_contractors(
         tender_hits, item_name, sector_tag, inferred, cache, progress_cb=progress_cb, timeout=DEFAULT_TIMEOUT
     )
     for tc in tender_contractors:
         tdom = str(tc.get("domain", "")).lower()
-        if tdom and tdom not in seen_domains:
+        if tdom and tdom not in seen_domains and tdom not in pending_domains:
             seen_domains.add(tdom)
             if skip_domains is not None:
                 skip_domains.add(tdom)
-            _merge_firm_into_cache(cache, tc, sector_tag, inferred)
-            results.append(tc)
+            pending_domains.add(tdom)
+            inspected_count += 1
+            tc.setdefault("site_title", tc.get("company_name", ""))
+            tc.setdefault("site_excerpt", f"{tc.get('company_name', '')} ihale yüklenicisi {tc.get('notes', '')}")
+            pending_verification.append(tc)
+
+    # 2) Kayıt Öncesi AI Tampon Bölgesi (20'şerli paketler + Fail-Closed Kilidi)
+    ai_rejected_count = 0
+    verified_added_count = 0
+    ai_error = ""
+
+    if pending_verification:
+        if progress_cb:
+            progress_cb(f"{item_name}: {len(pending_verification)} aday firma Gemini AI ile doğrulanıyor...")
+        from ai_parser import verify_suppliers_with_ai
+
+        ver_res = verify_suppliers_with_ai(pending_verification, item_name, effective_key, batch_size=20)
+        if ver_res.get("error"):
+            ai_error = str(ver_res["error"])
+            # FAIL-CLOSED: Hata durumunda hiçbir onaysız aday kaydedilmez
+        else:
+            ai_rejected_count = int(ver_res.get("rejected_count") or 0)
+            for v in ver_res.get("verified") or []:
+                v["ai_verified"] = 1
+                v_sec = str(v.get("sector") or sector_tag).strip()
+                _merge_firm_into_cache(cache, v, v_sec, inferred)
+                results.append(v)
+                verified_added_count += 1
+
+    if stats_out is not None:
+        stats_out["inspected_count"] = int(stats_out.get("inspected_count", 0)) + inspected_count
+        stats_out["ai_rejected_count"] = int(stats_out.get("ai_rejected_count", 0)) + pre_rejected_count + ai_rejected_count
+        stats_out["verified_added_count"] = int(stats_out.get("verified_added_count", 0)) + verified_added_count
+        if ai_error:
+            errs = stats_out.setdefault("errors", [])
+            if ai_error not in errs:
+                errs.append(ai_error)
 
     return results
 
